@@ -1,5 +1,6 @@
 """Smoke tests for foundational CLI commands."""
 
+import re
 from pathlib import Path
 
 import pytest
@@ -21,6 +22,12 @@ from vlmux.models.base import ModelAdapter
 from vlmux.perception import CaptureOptions, ScreenCaptureProvider
 
 runner = CliRunner()
+ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+
+
+def normalize_terminal_output(output: str) -> str:
+    """Remove styling and wrapping differences from captured terminal output."""
+    return " ".join(ANSI_ESCAPE.sub("", output).split())
 
 
 def test_version_command() -> None:
@@ -53,14 +60,11 @@ def test_invalid_config_returns_nonzero_exit(tmp_path: Path) -> None:
 
 def test_root_help_lists_only_implemented_commands() -> None:
     result = runner.invoke(app, ["--help"])
+    output = normalize_terminal_output(result.stdout)
 
     assert result.exit_code == 0
-    assert "doctor" in result.stdout
-    assert "models" in result.stdout
-    assert "observe" in result.stdout
-    assert "│ run " in result.stdout
-    assert "screenshot" in result.stdout
-    assert "version" in result.stdout
+    for command in ("doctor", "models", "observe", "run", "screenshot", "version"):
+        assert re.search(rf"\b{command}\b", output)
 
 
 class FakeCaptureProvider(ScreenCaptureProvider):
@@ -102,7 +106,7 @@ def test_screenshot_refuses_to_replace_existing_file(
 
     assert result.exit_code == 1
     assert destination.read_bytes() == b"existing"
-    assert "use --force" in result.stdout
+    assert "use --force" in normalize_terminal_output(result.stdout)
 
 
 def test_doctor_reports_phase_two_capabilities(monkeypatch: pytest.MonkeyPatch) -> None:

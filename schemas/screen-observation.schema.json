@@ -1,0 +1,84 @@
+{
+  "additionalProperties": false,
+  "description": "A captured screen encoded for transport to a vision model.\n\n``source_width`` and ``source_height`` preserve the native coordinate\nspace when the encoded image has been resized.",
+  "properties": {
+    "height": {
+      "exclusiveMinimum": 0,
+      "title": "Height",
+      "type": "integer"
+    },
+    "image": {
+      "description": "Base64-encoded image bytes",
+      "minLength": 1,
+      "title": "Image",
+      "type": "string"
+    },
+    "image_format": {
+      "default": "png",
+      "pattern": "^[a-z0-9][a-z0-9.+-]*$",
+      "title": "Image Format",
+      "type": "string"
+    },
+    "monitor": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Monitor"
+    },
+    "origin_x": {
+      "default": 0,
+      "title": "Origin X",
+      "type": "integer"
+    },
+    "origin_y": {
+      "default": 0,
+      "title": "Origin Y",
+      "type": "integer"
+    },
+    "source_height": {
+      "anyOf": [
+        {
+          "exclusiveMinimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Source Height"
+    },
+    "source_width": {
+      "anyOf": [
+        {
+          "exclusiveMinimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Source Width"
+    },
+    "width": {
+      "exclusiveMinimum": 0,
+      "title": "Width",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "width",
+    "height",
+    "image"
+  ],
+  "title": "ScreenObservation",
+  "type": "object"
+}

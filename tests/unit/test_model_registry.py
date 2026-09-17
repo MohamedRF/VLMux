@@ -47,9 +47,7 @@ def test_remote_builtin_provider_requires_api_key() -> None:
 
 
 def test_registry_rejects_unknown_provider() -> None:
-    config = resolve_model_reference(
-        Settings(provider="unknown", model="model", base_url="http://localhost:1")
-    )
-
     with pytest.raises(ConfigurationError, match="unknown"):
-        create_builtin_registry().create(config)
+        resolve_model_reference(
+            Settings(provider="unknown", model="model", base_url="http://localhost:1")
+        )

@@ -6,7 +6,12 @@ from vlmux.config import Settings
 from vlmux.core import RuntimeResult
 from vlmux.events import EventBus
 from vlmux.executors import create_computer_executor
-from vlmux.models import create_builtin_registry, resolve_model_reference
+from vlmux.models import (
+    CredentialStore,
+    create_builtin_registry,
+    load_provider_catalog,
+    resolve_model_reference,
+)
 from vlmux.observation import ScreenObserver
 from vlmux.perception import CaptureOptions, create_screen_capture_provider
 from vlmux.policy import PolicyEngine, RiskLevel
@@ -36,13 +41,16 @@ async def run_task(
     events: EventBus | None = None,
 ) -> RuntimeResult:
     """Construct and run one task, always closing owned network resources."""
+    catalog = load_provider_catalog()
     adapter_config = resolve_model_reference(
         settings,
         model_override=model_override,
         provider_override=provider_override,
         base_url_override=base_url_override,
+        catalog=catalog,
+        credentials=CredentialStore(),
     )
-    adapter = create_builtin_registry().create(adapter_config)
+    adapter = create_builtin_registry(catalog).create(adapter_config)
     observer = ScreenObserver(
         create_screen_capture_provider(),
         capture_options_from_settings(settings),

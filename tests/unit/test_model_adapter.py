@@ -133,3 +133,69 @@ def test_healthcheck_reports_model_inventory() -> None:
 
     assert health.connected
     assert health.metadata["available_models"] == 1
+
+
+def test_image_input_check_sends_image_and_accepts_valid_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        "vlmux.models.openai_compatible._build_vision_probe",
+        lambda: ("data:image/png;base64,probe", "purple"),
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["payload"] = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": "purple"}}]},
+        )
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    adapter = OpenAICompatibleAdapter(config(), client=client)
+
+    support = asyncio.run(adapter.check_image_input())
+    asyncio.run(client.aclose())
+
+    assert support.accepted
+    assert "data:image/png;base64,probe" in str(captured["payload"])
+
+
+def test_image_input_check_rejects_incorrect_visual_answer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "vlmux.models.openai_compatible._build_vision_probe",
+        lambda: ("data:image/png;base64,probe", "purple"),
+    )
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(
+                200,
+                json={"choices": [{"message": {"content": "orange"}}]},
+            )
+        )
+    )
+    adapter = OpenAICompatibleAdapter(config(), client=client)
+
+    support = asyncio.run(adapter.check_image_input())
+    asyncio.run(client.aclose())
+
+    assert not support.accepted
+    assert "did not correctly interpret" in support.detail
+
+
+def test_image_input_check_rejects_model_http_error_without_leaking_body() -> None:
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(400, text="private provider details")
+        )
+    )
+    adapter = OpenAICompatibleAdapter(config(), client=client)
+
+    support = asyncio.run(adapter.check_image_input())
+    asyncio.run(client.aclose())
+
+    assert not support.accepted
+    assert "HTTP 400" in support.detail
+    assert "private provider details" not in support.detail

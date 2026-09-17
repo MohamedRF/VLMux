@@ -77,9 +77,26 @@ output.
 
 ## Models and runtime
 
-Built-in providers are `ollama`, `openai-compatible`, `openai`, and `openrouter`.
+VLMux includes provider presets for OpenAI, OpenRouter, Google Gemini, Groq, Together AI,
+Fireworks AI, DeepInfra, Mistral AI, xAI, and Ollama. It also supports any custom endpoint that
+implements the OpenAI-compatible `/chat/completions` API.
 
 ```bash
+# Connect a preset. The key is prompted for without echoing it. VLMux sends a small image request
+# and saves the credential only if this exact model correctly interprets the image.
+vlmux models add --provider openrouter --model google/gemini-2.5-pro
+
+# Read a key from an environment variable instead of an interactive prompt.
+vlmux models add --provider groq --model MODEL_ID --api-key-env GROQ_API_KEY
+
+# Add a custom OpenAI-compatible provider.
+vlmux models add --provider my-vlm --name "My VLM" \
+  --base-url https://models.example/v1 --model vision-model
+
+# A local custom endpoint can explicitly omit credentials.
+vlmux models add --provider local-vlm --base-url http://127.0.0.1:8000/v1 \
+  --model vision-model --no-api-key
+
 # Local Ollama; no API key or network service outside localhost is required.
 vlmux run --model ollama/qwen3-vl "Open Calculator and calculate 1729 multiplied by 47"
 
@@ -93,6 +110,13 @@ vlmux run --model openrouter/google/gemini-model "Open Calculator"
 vlmux models list
 vlmux models test --model ollama/qwen3-vl
 ```
+
+Saved credentials are kept in `auth.json` beside the platform-specific configuration file, not in
+`config.toml`. Custom provider definitions are kept separately in `providers.json`. Both files are
+created with user-only file permissions where the operating system supports POSIX permissions.
+`VLMUX_API_KEY` continues to override a saved credential. Treat `auth.json` as a secret and never
+commit or share it. The verification call contacts the selected provider with a randomly selected
+solid-color image and may consume a small number of tokens.
 
 `--offline` rejects model URLs other than localhost. Model responses undergo JSON extraction,
 Pydantic schema validation, coordinate normalization, coordinate bounds validation, and policy

@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import os
 import platform
 import sys
 from pathlib import Path
 from typing import Annotated
 
 import typer
+from pydantic import SecretStr, ValidationError
 from rich.console import Console
 from rich.table import Table
 
@@ -20,7 +22,16 @@ from vlmux.core import Observation, RuntimeStatus
 from vlmux.events import Event, EventBus
 from vlmux.exceptions import ConfigurationError, VLMuxError
 from vlmux.executors import create_computer_executor
-from vlmux.models import ModelHealth, create_builtin_registry, resolve_model_reference
+from vlmux.models import (
+    AdapterConfig,
+    CredentialStore,
+    ProviderDefinition,
+    VisionSupport,
+    create_builtin_registry,
+    load_provider_catalog,
+    resolve_model_reference,
+    save_custom_provider,
+)
 from vlmux.perception import CaptureOptions, create_screen_capture_provider
 from vlmux.policy import PolicyDecision
 from vlmux.protocol import Action, dump_action_json
@@ -243,25 +254,133 @@ def _print_event(event: Event) -> None:
 
 @models_app.command("list")
 def list_model_providers() -> None:
-    """List built-in model providers and current configuration."""
+    """List provider presets, custom providers, and verification status."""
     try:
         settings = load_settings()
+        catalog = load_provider_catalog()
+        credentials = CredentialStore()
+        rows = [
+            (
+                definition,
+                credentials.verified_model(definition.id) or "",
+            )
+            for definition in catalog.providers()
+        ]
     except ConfigurationError as error:
         console.print(f"[red]Configuration error:[/red] {error}", style=None)
         raise typer.Exit(code=2) from error
-    registry = create_builtin_registry()
     table = Table(title="VLMux model providers")
-    table.add_column("Provider")
+    table.add_column("Provider", no_wrap=True)
+    table.add_column("Type")
     table.add_column("Configured")
-    table.add_column("Model")
-    for provider_name in registry.providers():
-        configured = provider_name == settings.provider
+    table.add_column("Vision-verified model")
+    for definition, verified_model in rows:
+        configured = definition.id == settings.provider
         table.add_row(
-            provider_name,
+            definition.id,
+            "custom" if definition.custom else "preset",
             "yes" if configured else "no",
-            settings.model if configured and settings.model else "",
+            verified_model,
         )
     console.print(table)
+
+
+@models_app.command("add")
+def add_model_provider(
+    provider: Annotated[
+        str,
+        typer.Option("--provider", "-p", help="Preset or new custom provider ID."),
+    ],
+    model: Annotated[
+        str,
+        typer.Option("--model", "-m", help="Exact model ID exposed by the provider."),
+    ],
+    base_url: Annotated[
+        str | None,
+        typer.Option("--base-url", help="OpenAI-compatible /v1 URL for a custom provider."),
+    ] = None,
+    name: Annotated[
+        str | None,
+        typer.Option("--name", help="Display name for a custom provider."),
+    ] = None,
+    api_key_env: Annotated[
+        str | None,
+        typer.Option(
+            "--api-key-env",
+            help="Read the API key from this environment variable instead of prompting.",
+        ),
+    ] = None,
+    no_api_key: Annotated[
+        bool,
+        typer.Option("--no-api-key", help="Custom/local endpoint does not require a key."),
+    ] = False,
+) -> None:
+    """Verify a model accepts images, then save its provider credentials."""
+    provider_id = provider.strip().lower()
+    model_id = model.strip()
+    try:
+        if not model_id:
+            raise ConfigurationError("model ID must not be blank")
+        catalog = load_provider_catalog()
+        definition = catalog.get(provider_id)
+        is_custom = definition is None or provider_id == "openai-compatible"
+        if is_custom:
+            if not base_url:
+                raise ConfigurationError("a custom provider requires --base-url")
+            definition = ProviderDefinition(
+                id=provider_id,
+                name=name or provider_id,
+                base_url=base_url,
+                requires_api_key=not no_api_key,
+                custom=True,
+            )
+            catalog = catalog.with_provider(definition)
+        elif base_url is not None or name is not None or no_api_key:
+            raise ConfigurationError(
+                "preset providers cannot be overridden; use a new custom provider ID"
+            )
+        if definition is None or definition.base_url is None:
+            raise ConfigurationError("provider does not define an API base URL")
+
+        api_key: SecretStr | None = None
+        if definition.requires_api_key:
+            raw_api_key = os.environ.get(api_key_env) if api_key_env else None
+            if api_key_env and raw_api_key is None:
+                raise ConfigurationError(f"environment variable is not set: {api_key_env}")
+            if raw_api_key is None:
+                raw_api_key = typer.prompt("API key", hide_input=True)
+            if not raw_api_key.strip():
+                raise ConfigurationError("API key must not be blank")
+            api_key = SecretStr(raw_api_key)
+
+        config = AdapterConfig(
+            provider=definition.id,
+            model=model_id,
+            api_key=api_key,
+            base_url=definition.base_url,
+        )
+        adapter = create_builtin_registry(catalog).create(config)
+
+        async def verify() -> VisionSupport:
+            try:
+                return await adapter.check_image_input()
+            finally:
+                await adapter.aclose()
+
+        support = asyncio.run(verify())
+        if not support.accepted:
+            raise ConfigurationError(
+                f"credentials were not saved because {support.provider}/{support.model} "
+                f"did not pass image-input validation: {support.detail}"
+            )
+        if definition.custom:
+            save_custom_provider(definition)
+        CredentialStore().save_verified(definition.id, model_id, api_key)
+    except (VLMuxError, OSError, ValueError, ValidationError) as error:
+        console.print(f"[red]Model setup error:[/red] {error}", style=None)
+        raise typer.Exit(code=1) from error
+    saved_item = "credentials" if api_key is not None else "provider verification"
+    console.print(f"OK: {definition.id}/{model_id} accepted image input; {saved_item} saved.")
 
 
 @models_app.command("test")
@@ -273,30 +392,33 @@ def test_model_provider(
     provider: Annotated[str | None, typer.Option("--provider")] = None,
     base_url: Annotated[str | None, typer.Option("--base-url")] = None,
 ) -> None:
-    """Check connectivity to a configured model provider."""
+    """Verify that a configured model can interpret image input."""
     try:
         settings = load_settings()
+        catalog = load_provider_catalog()
         config = resolve_model_reference(
             settings,
             model_override=model,
             provider_override=provider,
             base_url_override=base_url,
+            catalog=catalog,
+            credentials=CredentialStore(),
         )
-        adapter = create_builtin_registry().create(config)
+        adapter = create_builtin_registry(catalog).create(config)
 
-        async def check() -> ModelHealth:
+        async def check() -> VisionSupport:
             try:
-                return await adapter.healthcheck()
+                return await adapter.check_image_input()
             finally:
                 await adapter.aclose()
 
-        health = asyncio.run(check())
+        support = asyncio.run(check())
     except (VLMuxError, OSError, ValueError) as error:
         console.print(f"[red]Model error:[/red] {error}", style=None)
         raise typer.Exit(code=1) from error
-    status = "OK" if health.connected else "ERROR"
-    console.print(f"{status}: {health.provider}/{health.model} - {health.detail}")
-    if not health.connected:
+    status = "OK" if support.accepted else "ERROR"
+    console.print(f"{status}: {support.provider}/{support.model} - {support.detail}")
+    if not support.accepted:
         raise typer.Exit(code=1)
 
 

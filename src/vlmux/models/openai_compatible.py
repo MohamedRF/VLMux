@@ -3,15 +3,20 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import re
+import secrets
+from io import BytesIO
 from time import perf_counter
 from typing import Any
 from uuid import uuid4
 
 import httpx
+from PIL import Image
 
 from vlmux.core import AgentContext, ModelDecision, Observation, Task
 from vlmux.exceptions import ActionValidationError, ModelConnectionError, ModelResponseError
-from vlmux.models.base import AdapterConfig, ModelAdapter, ModelHealth
+from vlmux.models.base import AdapterConfig, ModelAdapter, ModelHealth, VisionSupport
 from vlmux.models.parsing import normalize_action_coordinates, parse_model_action
 from vlmux.models.prompt import build_system_prompt, build_user_content
 
@@ -100,6 +105,57 @@ class OpenAICompatibleAdapter(ModelAdapter):
             metadata={"available_models": len(available)},
         )
 
+    async def check_image_input(self) -> VisionSupport:
+        """Require the model to interpret a harmless random color image."""
+        image_url, expected_color = _build_vision_probe()
+        try:
+            response = await self._request(
+                "POST",
+                "/chat/completions",
+                json={
+                    "model": self.config.model,
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": (
+                                        "This is an image-input capability check. "
+                                        "Identify the dominant color in the attached image. "
+                                        "Reply with only the lowercase English color name."
+                                    ),
+                                },
+                                {
+                                    "type": "image_url",
+                                    "image_url": {"url": image_url},
+                                },
+                            ],
+                        }
+                    ],
+                    "temperature": 0,
+                },
+            )
+            payload = response.json()
+            content, _ = self._extract_content(payload)
+            if not content.strip():
+                raise ModelResponseError("model returned empty assistant content")
+            if re.search(rf"\b{re.escape(expected_color)}\b", content.casefold()) is None:
+                raise ModelResponseError("model did not correctly interpret the test image")
+        except (ModelConnectionError, ModelResponseError, ValueError) as error:
+            return VisionSupport(
+                accepted=False,
+                provider=self.config.provider,
+                model=self.config.model,
+                detail=f"image input was rejected or not usable: {error}",
+            )
+        return VisionSupport(
+            accepted=True,
+            provider=self.config.provider,
+            model=self.config.model,
+            detail="model correctly interpreted image input",
+        )
+
     async def aclose(self) -> None:
         if self._owns_client:
             await self._client.aclose()
@@ -164,6 +220,24 @@ class OpenAICompatibleAdapter(ModelAdapter):
             raise ModelResponseError("model assistant content was not text")
         usage = payload.get("usage", {})
         return content, usage if isinstance(usage, dict) else {}
+
+
+def _build_vision_probe() -> tuple[str, str]:
+    """Return an unpredictable, easy-to-recognize image challenge."""
+    colors = {
+        "red": (255, 0, 0),
+        "green": (0, 160, 0),
+        "blue": (0, 80, 255),
+        "yellow": (255, 220, 0),
+        "purple": (145, 40, 180),
+        "orange": (255, 125, 0),
+    }
+    name = secrets.choice(tuple(colors))
+    image = Image.new("RGB", (64, 64), colors[name])
+    encoded = BytesIO()
+    image.save(encoded, format="PNG")
+    payload = base64.b64encode(encoded.getvalue()).decode("ascii")
+    return f"data:image/png;base64,{payload}", name
 
 
 def _usage_integer(usage: dict[str, Any], key: str) -> int | None:

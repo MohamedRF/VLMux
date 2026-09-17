@@ -2,6 +2,16 @@
 
 All notable changes to VLMux will be documented here. The project follows semantic versioning.
 
+## Unreleased
+
+- Added data-driven presets for common OpenAI-compatible API providers and persisted custom
+  provider definitions.
+- Added `vlmux models add`, which performs a live image-input capability check before saving an API
+  credential or custom provider.
+- Added separate atomic `auth.json` credential storage with restrictive file permissions and
+  runtime lookup of verified credentials.
+- Changed `vlmux models test` to exercise real image input instead of connectivity alone.
+
 ## 0.1.0 - 2026-09-16
 
 - Established the Python package, developer tooling, CI, and project documentation.

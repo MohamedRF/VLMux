@@ -4,6 +4,7 @@ import re
 from pathlib import Path
 
 import pytest
+from pydantic import SecretStr
 from typer.testing import CliRunner
 
 from vlmux.cli.app import app
@@ -17,7 +18,13 @@ from vlmux.core import (
     ScreenObservation,
     Task,
 )
-from vlmux.models import AdapterConfig, ModelHealth
+from vlmux.models import (
+    AdapterConfig,
+    ModelHealth,
+    ProviderCatalog,
+    ProviderDefinition,
+    VisionSupport,
+)
 from vlmux.models.base import ModelAdapter
 from vlmux.perception import CaptureOptions, ScreenCaptureProvider
 
@@ -193,6 +200,14 @@ class HealthyAdapter(ModelAdapter):
     async def healthcheck(self) -> ModelHealth:
         return ModelHealth(connected=True, provider="fake", model="vision", detail="connected")
 
+    async def check_image_input(self) -> VisionSupport:
+        return VisionSupport(
+            accepted=True,
+            provider="fake",
+            model="vision",
+            detail="model accepted an image input",
+        )
+
     async def aclose(self) -> None:
         self.closed = True
 
@@ -202,7 +217,22 @@ class FakeRegistry:
         self.adapter = adapter
 
     def create(self, config: AdapterConfig) -> ModelAdapter:
+        self.config = config
         return self.adapter
+
+
+class RecordingCredentialStore:
+    def __init__(self) -> None:
+        self.saved: tuple[str, str, str | None] | None = None
+
+    def save_verified(
+        self,
+        provider: str,
+        model: str,
+        api_key: SecretStr | None = None,
+    ) -> None:
+        secret = api_key.get_secret_value() if api_key is not None else None
+        self.saved = (provider, model, secret)
 
 
 def test_models_test_checks_provider_and_closes_adapter(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -214,10 +244,119 @@ def test_models_test_checks_provider_and_closes_adapter(monkeypatch: pytest.Monk
     )
     monkeypatch.setattr("vlmux.cli.app.load_settings", lambda: Settings())
     monkeypatch.setattr("vlmux.cli.app.resolve_model_reference", lambda *args, **kwargs: config)
-    monkeypatch.setattr("vlmux.cli.app.create_builtin_registry", lambda: FakeRegistry(adapter))
+    monkeypatch.setattr(
+        "vlmux.cli.app.create_builtin_registry", lambda *args: FakeRegistry(adapter)
+    )
 
     result = runner.invoke(app, ["models", "test", "--model", "fake/vision"])
 
     assert result.exit_code == 0
-    assert "connected" in result.stdout
+    assert "accepted an image input" in result.stdout
     assert adapter.closed
+
+
+def test_models_add_saves_credentials_only_after_image_check(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = HealthyAdapter()
+    registry = FakeRegistry(adapter)
+    credentials = RecordingCredentialStore()
+    monkeypatch.setenv("TEST_VLMUX_API_KEY", "verified-secret")
+    monkeypatch.setattr("vlmux.cli.app.load_provider_catalog", ProviderCatalog)
+    monkeypatch.setattr("vlmux.cli.app.create_builtin_registry", lambda *args: registry)
+    monkeypatch.setattr("vlmux.cli.app.CredentialStore", lambda: credentials)
+
+    result = runner.invoke(
+        app,
+        [
+            "models",
+            "add",
+            "--provider",
+            "openrouter",
+            "--model",
+            "vendor/vision",
+            "--api-key-env",
+            "TEST_VLMUX_API_KEY",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert credentials.saved == ("openrouter", "vendor/vision", "verified-secret")
+    assert registry.config.api_key is not None
+    assert "accepted image input" in result.stdout
+
+
+def test_models_add_persists_custom_provider_after_image_check(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = HealthyAdapter()
+    credentials = RecordingCredentialStore()
+    saved: list[ProviderDefinition] = []
+    monkeypatch.setenv("TEST_VLMUX_API_KEY", "verified-secret")
+    monkeypatch.setattr("vlmux.cli.app.load_provider_catalog", ProviderCatalog)
+    monkeypatch.setattr(
+        "vlmux.cli.app.create_builtin_registry", lambda *args: FakeRegistry(adapter)
+    )
+    monkeypatch.setattr("vlmux.cli.app.CredentialStore", lambda: credentials)
+    monkeypatch.setattr("vlmux.cli.app.save_custom_provider", saved.append)
+
+    result = runner.invoke(
+        app,
+        [
+            "models",
+            "add",
+            "--provider",
+            "my-vlm",
+            "--name",
+            "My VLM",
+            "--base-url",
+            "https://models.example/v1",
+            "--model",
+            "vision",
+            "--api-key-env",
+            "TEST_VLMUX_API_KEY",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert len(saved) == 1
+    assert saved[0].id == "my-vlm"
+    assert saved[0].custom
+
+
+def test_models_add_does_not_save_rejected_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    class RejectedAdapter(HealthyAdapter):
+        async def check_image_input(self) -> VisionSupport:
+            return VisionSupport(
+                accepted=False,
+                provider="openrouter",
+                model="text-only",
+                detail="image input was rejected",
+            )
+
+    credentials = RecordingCredentialStore()
+    monkeypatch.setenv("TEST_VLMUX_API_KEY", "unverified-secret")
+    monkeypatch.setattr("vlmux.cli.app.load_provider_catalog", ProviderCatalog)
+    monkeypatch.setattr(
+        "vlmux.cli.app.create_builtin_registry",
+        lambda *args: FakeRegistry(RejectedAdapter()),
+    )
+    monkeypatch.setattr("vlmux.cli.app.CredentialStore", lambda: credentials)
+
+    result = runner.invoke(
+        app,
+        [
+            "models",
+            "add",
+            "--provider",
+            "openrouter",
+            "--model",
+            "text-only",
+            "--api-key-env",
+            "TEST_VLMUX_API_KEY",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert credentials.saved is None
+    assert "were not saved" in normalize_terminal_output(result.stdout)

@@ -34,6 +34,17 @@ class ModelHealth(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class VisionSupport(BaseModel):
+    """Result of sending a real image input to a configured model."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    accepted: bool
+    provider: str
+    model: str
+    detail: str
+
+
 class ModelAdapter(ABC):
     """Convert a task and observation into one validated VAP decision."""
 
@@ -49,6 +60,15 @@ class ModelAdapter(ABC):
     @abstractmethod
     async def healthcheck(self) -> ModelHealth:
         """Check provider connectivity without requesting a computer action."""
+
+    async def check_image_input(self) -> VisionSupport:
+        """Verify image input support before a credential is persisted."""
+        return VisionSupport(
+            accepted=False,
+            provider="unknown",
+            model="unknown",
+            detail="adapter does not implement image-input validation",
+        )
 
     async def aclose(self) -> None:
         """Release adapter resources when owned by the implementation."""

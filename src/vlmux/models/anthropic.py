@@ -1,4 +1,4 @@
-"""Generic adapter for OpenAI-compatible multimodal chat APIs."""
+"""Native adapter for Anthropic-compatible Messages APIs."""
 
 from __future__ import annotations
 
@@ -15,11 +15,11 @@ from vlmux.models.base import AdapterConfig, ModelHealth, VisionSupport
 from vlmux.models.helpers import build_vision_probe, model_ids, usage_integer
 from vlmux.models.http import HTTPModelAdapter
 from vlmux.models.parsing import normalize_action_coordinates, parse_model_action
-from vlmux.models.prompt import build_system_prompt, build_user_content
+from vlmux.models.prompt import build_anthropic_user_content, build_system_prompt
 
 
-class OpenAICompatibleAdapter(HTTPModelAdapter):
-    """Use an OpenAI-compatible chat-completions endpoint for VLM decisions."""
+class AnthropicAdapter(HTTPModelAdapter):
+    """Use the Anthropic Messages wire protocol for VLM decisions."""
 
     def __init__(self, config: AdapterConfig, *, client: httpx.AsyncClient | None = None) -> None:
         super().__init__(config, client=client)
@@ -31,17 +31,16 @@ class OpenAICompatibleAdapter(HTTPModelAdapter):
         context: AgentContext,
     ) -> ModelDecision:
         messages: list[dict[str, Any]] = [
-            {"role": "system", "content": build_system_prompt()},
             {
                 "role": "user",
-                "content": build_user_content(task, observation, context),
-            },
+                "content": build_anthropic_user_content(task, observation, context),
+            }
         ]
         started = perf_counter()
         last_error: ModelResponseError | None = None
         for attempt in range(self.config.repair_attempts + 1):
-            response = await self._post_chat(messages)
-            raw_content, usage = self._extract_content(response)
+            payload = await self._post_messages(messages)
+            raw_content, usage = self._extract_content(payload)
             try:
                 action = parse_model_action(raw_content)
                 action = normalize_action_coordinates(action, observation.screen)
@@ -71,15 +70,15 @@ class OpenAICompatibleAdapter(HTTPModelAdapter):
             return ModelDecision(
                 action=action,
                 latency_ms=(perf_counter() - started) * 1000,
-                input_tokens=usage_integer(usage, "prompt_tokens"),
-                output_tokens=usage_integer(usage, "completion_tokens"),
+                input_tokens=usage_integer(usage, "input_tokens"),
+                output_tokens=usage_integer(usage, "output_tokens"),
                 metadata={"provider": self.config.provider},
             )
         raise last_error or ModelResponseError("model response validation failed")
 
     async def healthcheck(self) -> ModelHealth:
         try:
-            response = await self._request("GET", "/models")
+            response = await self._request("GET", "/v1/models")
             payload = response.json()
         except (ModelConnectionError, ValueError) as error:
             return ModelHealth(
@@ -101,43 +100,45 @@ class OpenAICompatibleAdapter(HTTPModelAdapter):
         )
 
     async def check_image_input(self) -> VisionSupport:
-        """Require the model to interpret a harmless random color image."""
+        """Verify base64 image blocks with a harmless random color image."""
         image_url, expected_color = build_vision_probe()
+        encoded = image_url.split(",", 1)[1]
         try:
             response = await self._request(
                 "POST",
-                "/chat/completions",
+                "/v1/messages",
                 json={
                     "model": self.config.model,
+                    "max_tokens": 32,
                     "messages": [
                         {
                             "role": "user",
                             "content": [
                                 {
-                                    "type": "text",
-                                    "text": (
-                                        "This is an image-input capability check. "
-                                        "Identify the dominant color in the attached image. "
-                                        "Reply with only the lowercase English color name."
-                                    ),
+                                    "type": "image",
+                                    "source": {
+                                        "type": "base64",
+                                        "media_type": "image/png",
+                                        "data": encoded,
+                                    },
                                 },
                                 {
-                                    "type": "image_url",
-                                    "image_url": {"url": image_url},
+                                    "type": "text",
+                                    "text": (
+                                        "Identify the dominant color in this image. Reply with "
+                                        "only the lowercase English color name."
+                                    ),
                                 },
                             ],
                         }
                     ],
-                    "temperature": 0,
                 },
             )
             payload = response.json()
             content, _ = self._extract_content(payload)
-            if not content.strip():
-                raise ModelResponseError("model returned empty assistant content")
             if re.search(rf"\b{re.escape(expected_color)}\b", content.casefold()) is None:
                 raise ModelResponseError("model did not correctly interpret the test image")
-        except (ModelConnectionError, ModelResponseError, ValueError) as error:
+        except (ModelConnectionError, ModelResponseError, ValueError, IndexError) as error:
             return VisionSupport(
                 accepted=False,
                 provider=self.config.provider,
@@ -151,18 +152,17 @@ class OpenAICompatibleAdapter(HTTPModelAdapter):
             detail="model correctly interpreted image input",
         )
 
-    async def _post_chat(self, messages: list[dict[str, Any]]) -> dict[str, Any]:
-        request: dict[str, Any] = {
-            "model": self.config.model,
-            "messages": messages,
-            "temperature": 0,
-        }
-        if self.config.supports_json_mode:
-            request["response_format"] = {"type": "json_object"}
+    async def _post_messages(self, messages: list[dict[str, Any]]) -> dict[str, Any]:
         response = await self._request(
             "POST",
-            "/chat/completions",
-            json=request,
+            "/v1/messages",
+            json={
+                "model": self.config.model,
+                "max_tokens": 1024,
+                "system": build_system_prompt(),
+                "messages": messages,
+                "temperature": 0,
+            },
         )
         try:
             payload = response.json()
@@ -172,14 +172,27 @@ class OpenAICompatibleAdapter(HTTPModelAdapter):
             raise ModelResponseError("model provider returned an invalid response envelope")
         return payload
 
+    def _authorization_headers(self) -> dict[str, str]:
+        if self.config.api_key is None:
+            return {}
+        return {"x-api-key": self.config.api_key.get_secret_value()}
+
+    def _provider_headers(self) -> dict[str, str]:
+        return {"anthropic-version": "2023-06-01"}
+
     @staticmethod
     def _extract_content(payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
-        try:
-            choices = payload["choices"]
-            content = choices[0]["message"]["content"]
-        except (KeyError, IndexError, TypeError) as error:
-            raise ModelResponseError("model response omitted assistant content") from error
-        if not isinstance(content, str):
+        blocks = payload.get("content")
+        if not isinstance(blocks, list):
+            raise ModelResponseError("model response omitted assistant content")
+        text = "".join(
+            block["text"]
+            for block in blocks
+            if isinstance(block, dict)
+            and block.get("type") == "text"
+            and isinstance(block.get("text"), str)
+        )
+        if not text:
             raise ModelResponseError("model assistant content was not text")
         usage = payload.get("usage", {})
-        return content, usage if isinstance(usage, dict) else {}
+        return text, usage if isinstance(usage, dict) else {}

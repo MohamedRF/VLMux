@@ -62,6 +62,26 @@ def test_adapter_sends_image_and_returns_normalized_decision() -> None:
     assert "data:image/png;base64,aQ==" in str(messages)
 
 
+def test_adapter_can_omit_optional_json_response_mode() -> None:
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.update(json.loads(request.content))
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"content": '{"type":"finish"}'}}]},
+        )
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    adapter = OpenAICompatibleAdapter(config(supports_json_mode=False), client=client)
+    asyncio.run(
+        adapter.decide(Task(instruction="finish"), observation(), AgentContext(task_id="task"))
+    )
+    asyncio.run(client.aclose())
+
+    assert "response_format" not in captured
+
+
 def test_adapter_performs_one_controlled_repair() -> None:
     responses = iter(["not-json", '{"type":"finish","message":"done"}'])
     requests = 0
@@ -140,7 +160,7 @@ def test_image_input_check_sends_image_and_accepts_valid_response(
 ) -> None:
     captured: dict[str, object] = {}
     monkeypatch.setattr(
-        "vlmux.models.openai_compatible._build_vision_probe",
+        "vlmux.models.openai_compatible.build_vision_probe",
         lambda: ("data:image/png;base64,probe", "purple"),
     )
 
@@ -165,7 +185,7 @@ def test_image_input_check_rejects_incorrect_visual_answer(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "vlmux.models.openai_compatible._build_vision_probe",
+        "vlmux.models.openai_compatible.build_vision_probe",
         lambda: ("data:image/png;base64,probe", "purple"),
     )
     client = httpx.AsyncClient(

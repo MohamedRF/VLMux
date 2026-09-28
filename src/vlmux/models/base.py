@@ -20,6 +20,7 @@ class AdapterConfig(BaseModel):
     timeout_seconds: float = Field(default=60.0, gt=0)
     request_retries: int = Field(default=2, ge=0, le=5)
     repair_attempts: int = Field(default=1, ge=0, le=3)
+    supports_json_mode: bool = True
 
 
 class ModelHealth(BaseModel):

@@ -27,6 +27,20 @@ def build_user_content(
     context: AgentContext,
 ) -> list[dict[str, Any]]:
     """Build OpenAI-compatible multimodal content with concise history."""
+    text = build_user_prompt(task, observation, context)
+    screen = observation.screen
+    media_type = "image/jpeg" if screen.image_format == "jpeg" else f"image/{screen.image_format}"
+    return [
+        {"type": "text", "text": text},
+        {
+            "type": "image_url",
+            "image_url": {"url": f"data:{media_type};base64,{screen.image}"},
+        },
+    ]
+
+
+def build_user_prompt(task: Task, observation: Observation, context: AgentContext) -> str:
+    """Build provider-neutral task, screen, and recent-history text."""
     history = [
         {
             "step": step.step,
@@ -46,11 +60,25 @@ def build_user_content(
         },
         separators=(",", ":"),
     )
+    return text
+
+
+def build_anthropic_user_content(
+    task: Task,
+    observation: Observation,
+    context: AgentContext,
+) -> list[dict[str, Any]]:
+    """Build Anthropic Messages API multimodal content."""
+    screen = observation.screen
     media_type = "image/jpeg" if screen.image_format == "jpeg" else f"image/{screen.image_format}"
     return [
-        {"type": "text", "text": text},
         {
-            "type": "image_url",
-            "image_url": {"url": f"data:{media_type};base64,{screen.image}"},
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": media_type,
+                "data": screen.image,
+            },
         },
+        {"type": "text", "text": build_user_prompt(task, observation, context)},
     ]

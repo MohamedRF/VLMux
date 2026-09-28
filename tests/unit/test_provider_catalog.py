@@ -20,7 +20,17 @@ from vlmux.models import (
 def test_builtin_catalog_exposes_common_provider_presets() -> None:
     catalog = ProviderCatalog()
 
-    for provider in ("openai", "openrouter", "gemini", "groq", "ollama"):
+    for provider in (
+        "openai",
+        "anthropic",
+        "openrouter",
+        "gemini",
+        "groq",
+        "huggingface",
+        "ollama",
+        "vllm",
+        "llamacpp",
+    ):
         assert catalog.get(provider) is not None
 
 

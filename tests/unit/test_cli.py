@@ -324,6 +324,41 @@ def test_models_add_persists_custom_provider_after_image_check(
     assert saved[0].custom
 
 
+def test_models_add_persists_custom_anthropic_protocol(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter = HealthyAdapter()
+    saved: list[ProviderDefinition] = []
+    monkeypatch.setenv("TEST_VLMUX_API_KEY", "verified-secret")
+    monkeypatch.setattr("vlmux.cli.app.load_provider_catalog", ProviderCatalog)
+    monkeypatch.setattr(
+        "vlmux.cli.app.create_builtin_registry", lambda *args: FakeRegistry(adapter)
+    )
+    monkeypatch.setattr("vlmux.cli.app.CredentialStore", lambda: RecordingCredentialStore())
+    monkeypatch.setattr("vlmux.cli.app.save_custom_provider", saved.append)
+
+    result = runner.invoke(
+        app,
+        [
+            "models",
+            "add",
+            "--provider",
+            "anthropic-proxy",
+            "--base-url",
+            "https://models.example",
+            "--protocol",
+            "anthropic",
+            "--model",
+            "vision",
+            "--api-key-env",
+            "TEST_VLMUX_API_KEY",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert saved[0].adapter == "anthropic"
+
+
 def test_models_add_does_not_save_rejected_model(monkeypatch: pytest.MonkeyPatch) -> None:
     class RejectedAdapter(HealthyAdapter):
         async def check_image_input(self) -> VisionSupport:

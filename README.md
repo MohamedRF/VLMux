@@ -15,7 +15,7 @@ model → VLMux → browser / desktop
 - ✅ Repository foundation, typed core domain models, and VAP 1.0 action schemas
 - ✅ Configuration precedence and foundational `version`, `doctor`, and `config` commands
 - ✅ Screen capture, image resizing/encoding, coordinate mapping, and Windows desktop execution
-- ✅ OpenAI-compatible, OpenRouter, and Ollama vision-model adapters
+- ✅ OpenAI-compatible and native Anthropic vision-model adapters, provider catalog, and custom APIs
 - ✅ Bounded runtime loop, policy checks, dry-run, events, and polished CLI
 - 🚧 Set-of-Marks (next phase)
 - 🗓 Browser mode, MCP, replay, and benchmarks
@@ -77,9 +77,10 @@ output.
 
 ## Models and runtime
 
-VLMux includes provider presets for OpenAI, OpenRouter, Google Gemini, Groq, Together AI,
-Fireworks AI, DeepInfra, Mistral AI, xAI, and Ollama. It also supports any custom endpoint that
-implements the OpenAI-compatible `/chat/completions` API.
+VLMux includes provider presets for OpenAI, Anthropic, OpenRouter, Google Gemini, Hugging Face,
+Groq, Together AI, Fireworks AI, DeepInfra, Mistral AI, xAI, Ollama, vLLM, and llama.cpp. Custom
+providers can use either the OpenAI-compatible Chat Completions protocol or the Anthropic Messages
+protocol. The selected model must support image input; `models add` verifies that before saving it.
 
 ```bash
 # Connect a preset. The key is prompted for without echoing it. VLMux sends a small image request
@@ -93,12 +94,24 @@ vlmux models add --provider groq --model MODEL_ID --api-key-env GROQ_API_KEY
 vlmux models add --provider my-vlm --name "My VLM" \
   --base-url https://models.example/v1 --model vision-model
 
+# Add a custom Anthropic-compatible gateway or proxy.
+vlmux models add --provider claude-gateway --name "Claude Gateway" \
+  --protocol anthropic --base-url https://models.example --model vision-model
+
+# Some OpenAI-compatible models do not implement response_format.
+vlmux models add --provider minimal-vlm --base-url https://models.example/v1 \
+  --model vision-model --no-json-mode
+
 # A local custom endpoint can explicitly omit credentials.
 vlmux models add --provider local-vlm --base-url http://127.0.0.1:8000/v1 \
   --model vision-model --no-api-key
 
 # Local Ollama; no API key or network service outside localhost is required.
 vlmux run --model ollama/qwen3-vl "Open Calculator and calculate 1729 multiplied by 47"
+
+# Other local OpenAI-compatible VLM servers.
+vlmux run --model vllm/served-model-name "Open Calculator"
+vlmux run --model llamacpp/served-model-name "Open Calculator"
 
 # Inspect one proposed action without moving the mouse or typing.
 vlmux run --dry-run --model ollama/qwen3-vl "Open Calculator"

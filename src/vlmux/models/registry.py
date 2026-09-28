@@ -7,6 +7,7 @@ from urllib.parse import urlparse
 
 from vlmux.config import Settings
 from vlmux.exceptions import ConfigurationError
+from vlmux.models.anthropic import AnthropicAdapter
 from vlmux.models.base import AdapterConfig, ModelAdapter
 from vlmux.models.catalog import ProviderCatalog, ProviderDefinition
 from vlmux.models.credentials import CredentialStore
@@ -49,6 +50,8 @@ def create_builtin_registry(catalog: ProviderCatalog | None = None) -> ModelRegi
 
 
 def _factory_for(provider: ProviderDefinition) -> AdapterFactory:
+    if provider.adapter == "anthropic":
+        return AnthropicAdapter
     if provider.adapter == "openrouter":
         return OpenRouterAdapter
     if provider.adapter == "ollama":
@@ -104,6 +107,7 @@ def resolve_model_reference(
         timeout_seconds=settings.model_timeout_seconds,
         request_retries=settings.model_request_retries,
         repair_attempts=settings.model_repair_attempts,
+        supports_json_mode=definition.supports_json_mode,
     )
 
 

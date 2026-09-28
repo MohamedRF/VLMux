@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 from vlmux.config import default_config_path
 from vlmux.exceptions import ConfigurationError
 
-AdapterKind = Literal["openai-compatible", "openrouter", "ollama"]
+AdapterKind = Literal["openai-compatible", "openrouter", "ollama", "anthropic"]
 
 
 class ProviderDefinition(BaseModel):
@@ -27,6 +27,7 @@ class ProviderDefinition(BaseModel):
     base_url: str | None = Field(default=None, min_length=1)
     adapter: AdapterKind = "openai-compatible"
     requires_api_key: bool = True
+    supports_json_mode: bool = True
     custom: bool = False
 
     @field_validator("base_url")
@@ -47,6 +48,12 @@ BUILTIN_PROVIDERS: tuple[ProviderDefinition, ...] = (
         id="openai",
         name="OpenAI",
         base_url="https://api.openai.com/v1",
+    ),
+    ProviderDefinition(
+        id="anthropic",
+        name="Anthropic Claude",
+        base_url="https://api.anthropic.com",
+        adapter="anthropic",
     ),
     ProviderDefinition(
         id="openrouter",
@@ -90,10 +97,28 @@ BUILTIN_PROVIDERS: tuple[ProviderDefinition, ...] = (
         base_url="https://api.x.ai/v1",
     ),
     ProviderDefinition(
+        id="huggingface",
+        name="Hugging Face Inference Providers",
+        base_url="https://router.huggingface.co/v1",
+        supports_json_mode=False,
+    ),
+    ProviderDefinition(
         id="ollama",
         name="Ollama (local)",
         base_url="http://localhost:11434/v1",
         adapter="ollama",
+        requires_api_key=False,
+    ),
+    ProviderDefinition(
+        id="vllm",
+        name="vLLM (local)",
+        base_url="http://localhost:8000/v1",
+        requires_api_key=False,
+    ),
+    ProviderDefinition(
+        id="llamacpp",
+        name="llama.cpp (local)",
+        base_url="http://localhost:8080/v1",
         requires_api_key=False,
     ),
     ProviderDefinition(

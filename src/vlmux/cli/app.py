@@ -272,6 +272,7 @@ def list_model_providers() -> None:
     table = Table(title="VLMux model providers")
     table.add_column("Provider", no_wrap=True)
     table.add_column("Type")
+    table.add_column("Protocol")
     table.add_column("Configured")
     table.add_column("Vision-verified model")
     for definition, verified_model in rows:
@@ -279,6 +280,7 @@ def list_model_providers() -> None:
         table.add_row(
             definition.id,
             "custom" if definition.custom else "preset",
+            definition.adapter,
             "yes" if configured else "no",
             verified_model,
         )
@@ -297,12 +299,26 @@ def add_model_provider(
     ],
     base_url: Annotated[
         str | None,
-        typer.Option("--base-url", help="OpenAI-compatible /v1 URL for a custom provider."),
+        typer.Option("--base-url", help="API base URL for a custom provider."),
     ] = None,
     name: Annotated[
         str | None,
         typer.Option("--name", help="Display name for a custom provider."),
     ] = None,
+    protocol: Annotated[
+        str,
+        typer.Option(
+            "--protocol",
+            help="Custom provider protocol: openai-compatible or anthropic.",
+        ),
+    ] = "openai-compatible",
+    no_json_mode: Annotated[
+        bool,
+        typer.Option(
+            "--no-json-mode",
+            help="Do not send OpenAI response_format (for incompatible endpoints/models).",
+        ),
+    ] = False,
     api_key_env: Annotated[
         str | None,
         typer.Option(
@@ -327,15 +343,29 @@ def add_model_provider(
         if is_custom:
             if not base_url:
                 raise ConfigurationError("a custom provider requires --base-url")
+            if protocol not in {"openai-compatible", "anthropic"}:
+                raise ConfigurationError(
+                    "custom provider protocol must be 'openai-compatible' or 'anthropic'"
+                )
+            if protocol == "anthropic" and no_json_mode:
+                raise ConfigurationError("--no-json-mode applies only to openai-compatible APIs")
             definition = ProviderDefinition(
                 id=provider_id,
                 name=name or provider_id,
                 base_url=base_url,
+                adapter=protocol,
                 requires_api_key=not no_api_key,
+                supports_json_mode=not no_json_mode,
                 custom=True,
             )
             catalog = catalog.with_provider(definition)
-        elif base_url is not None or name is not None or no_api_key:
+        elif (
+            base_url is not None
+            or name is not None
+            or no_api_key
+            or protocol != "openai-compatible"
+            or no_json_mode
+        ):
             raise ConfigurationError(
                 "preset providers cannot be overridden; use a new custom provider ID"
             )
@@ -358,6 +388,7 @@ def add_model_provider(
             model=model_id,
             api_key=api_key,
             base_url=definition.base_url,
+            supports_json_mode=definition.supports_json_mode,
         )
         adapter = create_builtin_registry(catalog).create(config)
 

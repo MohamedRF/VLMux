@@ -4,6 +4,13 @@ All notable changes to VLMux will be documented here. The project follows semant
 
 ## Unreleased
 
+- Added native Anthropic Messages API support with image blocks, output repair, token usage, and
+  image capability verification.
+- Added Hugging Face, vLLM, and llama.cpp provider presets alongside the existing hosted and local
+  OpenAI-compatible providers.
+- Added protocol-selectable custom providers for OpenAI-compatible and Anthropic-compatible APIs.
+- Added `--no-json-mode` for OpenAI-compatible models that do not implement `response_format`.
+- Centralized provider HTTP retries, sanitized failures, authentication hooks, and client cleanup.
 - Added data-driven presets for common OpenAI-compatible API providers and persisted custom
   provider definitions.
 - Added `vlmux models add`, which performs a live image-input capability check before saving an API

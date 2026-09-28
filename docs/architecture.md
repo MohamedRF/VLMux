@@ -32,8 +32,10 @@ selection occurs only in the executor factory. Unsupported systems fail explicit
 pretending to execute input.
 
 `vlmux.models` defines the provider-independent adapter interface, response parsing, generic VLM
-prompt, and provider registry. OpenAI-compatible networking is implemented once; OpenRouter and
-Ollama specialize it without leaking provider branches into runtime code.
+prompt, and provider registry. A shared HTTP base owns bounded retries, sanitized failures, and
+client lifecycle. OpenAI-compatible networking is implemented once for hosted and local presets;
+the Anthropic adapter translates the same task and observation into native Messages image blocks.
+Provider selection remains confined to the registry and does not leak into the runtime.
 
 `vlmux.runtime` receives an adapter, observer, policy, executor, event bus, and confirmation
 callback through dependency injection. It enforces step, time, failure, retry, and repair bounds.
@@ -67,5 +69,7 @@ normalized coordinates must convert them before creating a VAP action.
 
 ## Planned phases
 
-Phases 0–5 are implemented. Phase 6 adds Set-of-Marks. Later phases add CDP browser mode, MCP,
-replay/benchmarking, and cross-platform hardening.
+Phases 0–5 are implemented. Phase 3 has additionally been expanded with native Anthropic,
+OpenAI-compatible hosted/local presets, and protocol-selectable custom providers. Phase 6 adds
+Set-of-Marks. Later phases add CDP browser mode, MCP, replay/benchmarking, and cross-platform
+hardening.

@@ -1,5 +1,6 @@
 """Vision-language model adapter interfaces and built-in providers."""
 
+from vlmux.models.anthropic import AnthropicAdapter
 from vlmux.models.base import AdapterConfig, ModelAdapter, ModelHealth, VisionSupport
 from vlmux.models.catalog import (
     ProviderCatalog,
@@ -16,6 +17,7 @@ from vlmux.models.registry import ModelRegistry, create_builtin_registry, resolv
 
 __all__ = [
     "AdapterConfig",
+    "AnthropicAdapter",
     "CredentialStore",
     "ModelAdapter",
     "ModelHealth",

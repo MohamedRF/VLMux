@@ -39,6 +39,7 @@ class WindowsWindowListProvider:
         """Return visible top-level windows with titles and bounds."""
         try:
             windows_library = vars(ctypes)["WinDLL"]
+            winfunctype = vars(ctypes)["WINFUNCTYPE"]
         except KeyError as error:
             raise UnsupportedPlatformError("window listing requires Windows") from error
         user32 = windows_library("user32", use_last_error=True)
@@ -55,7 +56,7 @@ class WindowsWindowListProvider:
         windows: list[WindowInfo] = []
         foreground = user32.GetForegroundWindow()
 
-        _callback_t = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+        _callback_t = winfunctype(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
 
         def _callback(hwnd: wintypes.HWND, _param: int) -> bool:
             if not user32.IsWindowVisible(hwnd):

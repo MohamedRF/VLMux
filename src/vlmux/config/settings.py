@@ -51,6 +51,13 @@ class Settings(BaseModel):
     screenshot_max_height: int | None = Field(default=1440, ge=1)
     screenshot_format: Literal["png", "jpeg"] = "png"
     screenshot_quality: int = Field(default=85, ge=1, le=100)
+    perception_mode: Literal["raw", "set_of_marks", "hybrid"] = "raw"
+    loop_threshold: int = Field(default=5, ge=2, le=100)
+    record_runs: bool = False
+    runs_dir: str = "runs"
+    browser_cdp_url: str | None = Field(default=None, min_length=1)
+    input_price_per_1k: float | None = Field(default=None, ge=0)
+    output_price_per_1k: float | None = Field(default=None, ge=0)
 
     def safe_dict(self) -> dict[str, Any]:
         """Return configuration suitable for logs and terminal output."""
@@ -105,6 +112,13 @@ def _read_config_file(path: Path) -> dict[str, Any]:
         "model_request_retries",
         "model_timeout_seconds",
         "offline",
+        "loop_threshold",
+        "perception_mode",
+        "record_runs",
+        "runs_dir",
+        "browser_cdp_url",
+        "input_price_per_1k",
+        "output_price_per_1k",
     }
     allowed_perception = {"screenshot"}
     allowed_policy = {"confirm", "deny"}

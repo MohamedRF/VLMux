@@ -67,9 +67,54 @@ normalized coordinates must convert them before creating a VAP action.
   injection.
 - Platform selection will live in one executor factory, not in runtime branches.
 
-## Planned phases
+## Set-of-Marks (Phase 6)
 
-Phases 0–5 are implemented. Phase 3 has additionally been expanded with native Anthropic,
-OpenAI-compatible hosted/local presets, and protocol-selectable custom providers. Phase 6 adds
-Set-of-Marks. Later phases add CDP browser mode, MCP, replay/benchmarking, and cross-platform
-hardening.
+`vlmux.perception.som` defines pluggable `ElementDetector`s. The default
+`RectangleDetector` scans for rectangular UI regions with Pillow only. The
+`SetOfMarksObserver` wraps any observer, draws numbered red badges, and
+stores a mark registry in observation metadata. The model may return
+`click_mark`; the runtime resolves the mark to coordinates before policy and
+execution. DOM detectors can supply elements through the same protocol.
+
+## Browser mode (Phase 7)
+
+`vlmux.browser` speaks Chrome DevTools Protocol over an injected transport
+(`CDPTransport`); tests use fakes, production uses `WebSocketCDPTransport`.
+`BrowserSession` supports navigate, history, reload, semantic
+`click_element`/`type_into_element` (DOM first), DOM inspection, interactive
+element listing, and screenshots. The runtime routes `browser_*` VAP actions
+to an optional browser executor and never falls back to coordinates when a
+semantic action is available and fails.
+
+## MCP, REST, and SDK (Phase 8)
+
+`vlmux.mcp` serves JSON-RPC MCP over stdio with `computer.*` tools backed by
+the same executor/observer as the CLI; `computer.run_task` reuses the runtime.
+`vlmux.server` serves the same runtime over local HTTP (`POST /v1/tasks`,
+`GET /v1/tasks/:id`, `GET /v1/observe`, `GET /health`). `vlmux.sdk`
+provides async `VLMux` (agent) and `Computer` (direct control) classes.
+
+## Replay, benchmarks, and verification (Phase 9)
+
+`vlmux.trace.TraceRecorder` writes opt-in run directories with task, steps,
+events, and screenshots; `vlmux replay` displays them. `vlmux.benchmark`
+loads TOML specs with verifier types (`screen_contains_text`, `url_equals`,
+`window_exists`, `dom_contains_text`, `always_true`) and reports raw
+measurements including token usage and cost (`local` for local models,
+`unknown` without configured prices). The runtime aggregates usage into
+`RuntimeResult.metadata`, detects repeated action loops (`runtime.loop_detected`),
+and emits perceptual-hash screen-change signals (`runtime.screen_unchanged`).
+A `Verifier` dependency can reject unsubstantiated `finish` claims.
+
+## Cross-platform (Phase 10)
+
+`MacOSExecutor` and `LinuxExecutor` share a pynput-backed POSIX base and
+differ only in application launching (`open -a` / direct exec). Capture is
+MSS-based everywhere; Windows adds active-window capture. `focus_window` and
+`close_window` dispatch through the base executor with explicit
+unsupported errors on platforms without window management backends.
+
+## Implemented phases
+
+Phases 0–10 are implemented; see the README status table for the
+implemented/experimental distinction of each surface.

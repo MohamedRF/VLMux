@@ -385,6 +385,85 @@
       "title": "ClickAction",
       "type": "object"
     },
+    "ClickMarkAction": {
+      "additionalProperties": false,
+      "description": "Click a numbered Set-of-Marks label produced by perception.",
+      "properties": {
+        "confidence": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Confidence"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        },
+        "mark": {
+          "maximum": 10000,
+          "minimum": 1,
+          "title": "Mark",
+          "type": "integer"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        },
+        "source_model": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Model"
+        },
+        "timestamp": {
+          "format": "date-time",
+          "title": "Timestamp",
+          "type": "string"
+        },
+        "type": {
+          "const": "click_mark",
+          "default": "click_mark",
+          "title": "Type",
+          "type": "string"
+        },
+        "version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "mark"
+      ],
+      "title": "ClickMarkAction",
+      "type": "object"
+    },
     "CloseWindowAction": {
       "additionalProperties": false,
       "description": "Close a matching window.",
@@ -1810,6 +1889,7 @@
       "browser_navigate": "#/$defs/BrowserNavigateAction",
       "browser_reload": "#/$defs/BrowserReloadAction",
       "click": "#/$defs/ClickAction",
+      "click_mark": "#/$defs/ClickMarkAction",
       "close_window": "#/$defs/CloseWindowAction",
       "double_click": "#/$defs/DoubleClickAction",
       "drag": "#/$defs/DragAction",
@@ -1892,6 +1972,9 @@
     },
     {
       "$ref": "#/$defs/FailAction"
+    },
+    {
+      "$ref": "#/$defs/ClickMarkAction"
     }
   ]
 }

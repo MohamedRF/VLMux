@@ -97,7 +97,10 @@ def doctor() -> None:
         "OK" if executor_error is None else "ERROR",
         executor_error or "input backend initialized",
     )
-    table.add_row("Browser integration", "UNAVAILABLE", "planned for Phase 7")
+    browser_available, browser_detail = _probe_browser()
+    table.add_row(
+        "Browser integration", "OK" if browser_available else "UNAVAILABLE", browser_detail
+    )
     console.print(table)
     if not python_supported or capture_error is not None or executor_error is not None:
         raise typer.Exit(code=1)
@@ -118,6 +121,16 @@ def _probe_desktop_control() -> str | None:
     except (VLMuxError, OSError) as error:
         return str(error)
     return None
+
+
+def _probe_browser() -> tuple[bool, str]:
+    try:
+        settings = load_settings()
+    except ConfigurationError:
+        return False, "not configured"
+    if not settings.browser_cdp_url:
+        return False, "no CDP endpoint configured (set browser_cdp_url)"
+    return True, settings.browser_cdp_url
 
 
 @app.command("observe")
@@ -541,6 +554,100 @@ def show_config_path() -> None:
 def main() -> None:
     """Run the VLMux CLI."""
     app()
+
+
+@app.command()
+def serve(
+    host: Annotated[str, typer.Option(help="Bind host.")] = "127.0.0.1",
+    port: Annotated[int, typer.Option(help="Bind port.")] = 8765,
+) -> None:
+    """Start the local REST API exposing the VLMux runtime."""
+    from vlmux.server import serve as serve_api
+
+    serve_api(host=host, port=port)
+
+
+@app.command()
+def mcp() -> None:
+    """Start the MCP server over stdio (also available as vlmux-mcp)."""
+    from vlmux.mcp.server import main as mcp_main
+
+    mcp_main()
+
+
+@app.command()
+def replay(
+    run_id: Annotated[str, typer.Argument(help="Run directory under runs/.")],
+    runs_dir: Annotated[str, typer.Option(help="Runs directory.")] = "runs",
+) -> None:
+    """Display a recorded task trace."""
+    from vlmux.trace import load_trace_events, load_trace_steps
+
+    directory = Path(runs_dir) / run_id
+    if not directory.exists():
+        console.print(f"[red]Trace not found:[/red] {directory}")
+        raise typer.Exit(code=1)
+    task_path = directory / "task.json"
+    if task_path.exists():
+        console.print_json(data=__import__("json").loads(task_path.read_text(encoding="utf-8")))
+    steps = load_trace_steps(directory)
+    events = load_trace_events(directory)
+    table = Table(title=f"Replay: {run_id}")
+    table.add_column("Step", justify="right")
+    table.add_column("Action")
+    table.add_column("Success")
+    for step in steps:
+        decision = step.get("decision", {})
+        result = step.get("result") or {}
+        action = decision.get("action", {}) if isinstance(decision, dict) else {}
+        table.add_row(
+            str(step.get("step")),
+            str(action.get("type", "?")),
+            str(result.get("success", "")),
+        )
+    console.print(table)
+    console.print(f"{len(events)} events recorded.")
+    console.print(f"Screenshots: {len(list((directory / 'screenshots').glob('*')))} files.")
+
+
+@app.command()
+def benchmark(
+    directory: Annotated[str, typer.Argument(help="Directory containing benchmark TOML specs.")],
+    models: Annotated[
+        list[str] | None, typer.Option("--model", help="Model reference to evaluate.")
+    ] = None,
+) -> None:
+    """Run benchmark specs against one or more models."""
+    from vlmux.benchmark import BenchmarkRunner, discover_specs, format_report
+    from vlmux.benchmark.runner import BenchmarkResult
+
+    model_refs: list[str] = list(models) if models else []
+    if not model_refs:
+        settings = load_settings()
+        model_refs = [f"{settings.provider}/{settings.model}"]
+
+    async def run_task_for_benchmark(task_text: str, model_ref: str, max_steps: int) -> object:
+        settings = load_settings(cli_overrides={"model": model_ref, "max_steps": max_steps})
+        return await run_task(task_text, settings)
+
+    try:
+        specs = discover_specs(directory)
+    except FileNotFoundError as error:
+        console.print(f"[red]Benchmark error:[/red] {error}")
+        raise typer.Exit(code=1) from error
+    if not specs:
+        console.print("No benchmark specs found.")
+        raise typer.Exit(code=1)
+
+    async def run_all() -> list[BenchmarkResult]:
+        runner = BenchmarkRunner(run_task_for_benchmark)
+        results: list[BenchmarkResult] = []
+        for spec in specs:
+            for model_ref in model_refs:
+                results.append(await runner.run_one(spec, model_ref))
+        return results
+
+    console.print(format_report(asyncio.run(run_all())))
 
 
 if __name__ == "__main__":

@@ -13,4 +13,12 @@ def create_computer_executor(*, system_name: str | None = None) -> ComputerExecu
         from vlmux.executors.windows import WindowsExecutor
 
         return WindowsExecutor()
+    if current_system == "Darwin":
+        from vlmux.executors.macos import MacOSExecutor
+
+        return MacOSExecutor()
+    if current_system == "Linux":
+        from vlmux.executors.linux import LinuxExecutor
+
+        return LinuxExecutor()
     raise UnsupportedPlatformError(f"desktop control is not supported on {current_system}")

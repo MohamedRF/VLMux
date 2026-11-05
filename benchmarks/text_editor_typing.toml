@@ -1,0 +1,8 @@
+# Text editor typing benchmark.
+name = "text_editor_typing"
+task = "Open a text editor and type: Hello from VLMux"
+max_steps = 20
+
+[success]
+type = "screen_contains_text"
+value = "Hello from VLMux"

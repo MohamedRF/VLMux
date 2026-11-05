@@ -16,7 +16,9 @@ def build_system_prompt() -> str:
         "Do not include markdown or prose. "
         "Coordinate fields must use pixels in the supplied screenshot: x=0,y=0 is its top-left. "
         "Never invent coordinates outside the image. Use finish only when the task is complete. "
-        "Use fail when the task cannot safely continue.\nVAP JSON Schema:\n"
+        "Use fail when the task cannot safely continue. "
+        "When numbered red labels are visible, you may instead return a click_mark "
+        'action using the visible label number (e.g. type "click_mark").\nVAP JSON Schema:\n'
         f"{schema}"
     )
 

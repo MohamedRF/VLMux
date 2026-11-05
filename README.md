@@ -17,12 +17,16 @@ model → VLMux → browser / desktop
 - ✅ Screen capture, image resizing/encoding, coordinate mapping, and Windows desktop execution
 - ✅ OpenAI-compatible and native Anthropic vision-model adapters, provider catalog, and custom APIs
 - ✅ Bounded runtime loop, policy checks, dry-run, events, and polished CLI
-- 🚧 Set-of-Marks (next phase)
-- 🗓 Browser mode, MCP, replay, and benchmarks
+- ✅ Set-of-Marks perception with `click_mark` resolution (perception mode: `set_of_marks` / `hybrid`)
+- ✅ Browser mode over CDP (navigate, semantic DOM clicks, DOM inspection; configure `browser_cdp_url`)
+- ✅ MCP server (`vlmux mcp` / `vlmux-mcp`), local REST API (`vlmux serve`), and Python SDK (`VLMux`, `Computer`)
+- ✅ Opt-in trace recording and `vlmux replay`; TOML benchmarks with verifiers and `vlmux benchmark`
+- ✅ macOS and Linux desktop executors alongside Windows
 
 Windows desktop input is available through an isolated executor. MSS-based full-screen and monitor
 capture are available where the operating system provides an interactive display. Active-window
-capture is currently Windows-only.
+capture is currently Windows-only. Browser mode requires a Chrome instance with CDP exposed
+(e.g. `chrome --remote-debugging-port=9222`) and `browser_cdp_url` set to its WebSocket endpoint.
 
 ## Quick start
 
@@ -154,11 +158,64 @@ the explicitly configured model provider.
 
 ## Desktop executor
 
-The Windows executor implements click, double-click, right-click, pointer movement, typing, key
-presses, hotkeys, scrolling, dragging, and asynchronous wait actions. OS input is isolated behind
-`ComputerExecutor`; tests use an injected backend and never move the CI machine's input devices.
-Absolute coordinates support negative virtual-desktop positions used by left and upper monitors.
-Shell-free application launching supports the initial calculator/text-editor workflow.
+The Windows, macOS, and Linux executors implement click, double-click, right-click, pointer
+movement, typing, key presses, hotkeys, scrolling, dragging, and asynchronous wait actions. OS
+input is isolated behind `ComputerExecutor`; tests use an injected backend and never move the CI
+machine's input devices. Absolute coordinates support negative virtual-desktop positions used by
+left and upper monitors. Shell-free application launching supports the initial
+calculator/text-editor workflow.
+
+## Perception modes
+
+```toml
+[runtime]
+perception_mode = "raw"  # or "set_of_marks" or "hybrid"
+```
+
+`set_of_marks` draws numbered red badges over detected UI elements; the model may then answer
+`{"type": "click_mark", "mark": 3}` and the runtime resolves it to coordinates. `hybrid` adds DOM
+metadata when a browser is attached.
+
+## Browser mode
+
+```toml
+[runtime]
+browser_cdp_url = "ws://127.0.0.1:9222/devtools/page/1"
+```
+
+Start Chrome with `--remote-debugging-port=9222`, then run tasks. Browser navigation actions
+(`browser_navigate`, `browser_back`, `browser_forward`, `browser_reload`) route to CDP; semantic
+element clicks prefer DOM over pixel coordinates.
+
+## MCP, REST API, and Python SDK
+
+```bash
+vlmux mcp            # MCP server over stdio (also: vlmux-mcp)
+vlmux serve          # REST API on http://127.0.0.1:8765
+```
+
+```python
+from vlmux import VLMux, Computer
+
+agent = VLMux(model="ollama/qwen3-vl")
+result = await agent.run("Open calculator and calculate 42 * 88")
+
+computer = Computer()
+await computer.click(100, 200)
+```
+
+## Replay and benchmarks
+
+```toml
+[runtime]
+record_runs = true
+runs_dir = "runs"
+```
+
+```bash
+vlmux replay RUN_ID
+vlmux benchmark benchmarks --model ollama/qwen3-vl --model openrouter/google/gemini-2.5-pro
+```
 
 ## Architecture
 

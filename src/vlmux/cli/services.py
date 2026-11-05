@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+from pathlib import Path
+
 from vlmux.config import Settings
-from vlmux.core import RuntimeResult
+from vlmux.core import RuntimeResult, Task
 from vlmux.events import EventBus
 from vlmux.executors import create_computer_executor
 from vlmux.models import (
@@ -12,10 +15,15 @@ from vlmux.models import (
     load_provider_catalog,
     resolve_model_reference,
 )
-from vlmux.observation import ScreenObserver
-from vlmux.perception import CaptureOptions, create_screen_capture_provider
+from vlmux.observation import HybridObserver, Observer, ScreenObserver, SetOfMarksObserver
+from vlmux.perception import (
+    CaptureOptions,
+    RectangleDetector,
+    create_screen_capture_provider,
+)
 from vlmux.policy import PolicyEngine, RiskLevel
 from vlmux.runtime import ConfirmationHandler, Runtime, RuntimeConfig
+from vlmux.trace import TraceRecorder
 
 
 def capture_options_from_settings(settings: Settings) -> CaptureOptions:
@@ -26,6 +34,28 @@ def capture_options_from_settings(settings: Settings) -> CaptureOptions:
         image_format=settings.screenshot_format,
         quality=settings.screenshot_quality,
     )
+
+
+def build_observer(settings: Settings) -> Observer:
+    """Build the configured observer chain for a task run."""
+    base: Observer = ScreenObserver(
+        create_screen_capture_provider(),
+        capture_options_from_settings(settings),
+    )
+    if settings.perception_mode == "set_of_marks":
+        return SetOfMarksObserver(base, RectangleDetector())
+    if settings.perception_mode == "hybrid":
+        return HybridObserver(base, RectangleDetector())
+    return base
+
+
+def build_browser_executor(settings: Settings):  # type: ignore[no-untyped-def]
+    """Build a browser executor when a CDP endpoint is configured."""
+    if not settings.browser_cdp_url:
+        return None
+    from vlmux.browser import BrowserExecutor, BrowserSession, WebSocketCDPTransport
+
+    return BrowserExecutor(BrowserSession(WebSocketCDPTransport(settings.browser_cdp_url)))
 
 
 async def run_task(
@@ -51,11 +81,16 @@ async def run_task(
         credentials=CredentialStore(),
     )
     adapter = create_builtin_registry(catalog).create(adapter_config)
-    observer = ScreenObserver(
-        create_screen_capture_provider(),
-        capture_options_from_settings(settings),
-    )
+    observer = build_observer(settings)
     executor = None if dry_run else create_computer_executor()
+    browser_executor = build_browser_executor(settings)
+    recorder: TraceRecorder | None = None
+    if settings.record_runs:
+        run_id = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
+        recorder = TraceRecorder(Path(settings.runs_dir) / run_id)
+        await recorder.record_task(Task(instruction=instruction))
+        if events is not None:
+            recorder.attach(events)
     runtime = Runtime(
         model=adapter,
         observer=observer,
@@ -71,7 +106,10 @@ async def run_task(
             max_runtime_seconds=settings.max_runtime_seconds,
             max_failures=settings.max_failures,
             dry_run=dry_run,
+            loop_threshold=settings.loop_threshold,
         ),
+        browser_executor=browser_executor,
+        recorder=recorder,
     )
     try:
         return await runtime.run(instruction)

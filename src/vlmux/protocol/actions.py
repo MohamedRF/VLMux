@@ -236,6 +236,13 @@ class FailAction(BaseAction):
     retryable: bool = False
 
 
+class ClickMarkAction(BaseAction):
+    """Click a numbered Set-of-Marks label produced by perception."""
+
+    type: Literal["click_mark"] = "click_mark"
+    mark: int = Field(ge=1, le=10_000)
+
+
 Action = Annotated[
     ClickAction
     | DoubleClickAction
@@ -257,7 +264,8 @@ Action = Annotated[
     | BrowserForwardAction
     | BrowserReloadAction
     | FinishAction
-    | FailAction,
+    | FailAction
+    | ClickMarkAction,
     Field(discriminator="type"),
 ]
 

@@ -1,0 +1,8 @@
+# Browser navigation benchmark.
+name = "browser_github"
+task = "Open the browser and navigate to https://github.com"
+max_steps = 15
+
+[success]
+type = "url_equals"
+value = "https://github.com/"

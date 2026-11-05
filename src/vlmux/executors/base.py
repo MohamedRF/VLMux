@@ -12,8 +12,10 @@ from vlmux.exceptions import ActionExecutionError
 from vlmux.protocol import (
     Action,
     ClickAction,
+    CloseWindowAction,
     DoubleClickAction,
     DragAction,
+    FocusWindowAction,
     HotkeyAction,
     KeyAction,
     MoveCursorAction,
@@ -83,6 +85,10 @@ class ComputerExecutor(ABC):
             await self.wait(action.duration_ms)
         elif isinstance(action, OpenAppAction):
             await self.open_app(action.application, action.arguments)
+        elif isinstance(action, FocusWindowAction):
+            await self.focus_window(action.window_id, action.title)
+        elif isinstance(action, CloseWindowAction):
+            await self.close_window(action.window_id, action.title)
         else:
             raise ActionExecutionError(
                 f"action type '{action.type}' is not supported by the desktop executor"
@@ -147,3 +153,15 @@ class ComputerExecutor(ABC):
     @abstractmethod
     async def open_app(self, application: str, arguments: list[str]) -> None:
         """Launch an application without invoking a command shell."""
+
+    async def focus_window(self, window_id: str | None, title: str | None) -> None:
+        """Bring a matching window to the foreground."""
+        raise ActionExecutionError("focus_window is not supported by this executor")
+
+    async def close_window(self, window_id: str | None, title: str | None) -> None:
+        """Close a matching window."""
+        raise ActionExecutionError("close_window is not supported by this executor")
+
+    async def list_windows(self) -> list[dict[str, object]]:
+        """List windows known to this executor, if discoverable."""
+        return []

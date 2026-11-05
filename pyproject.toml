@@ -25,6 +25,7 @@ dependencies = [
   "pynput>=1.8,<2",
   "rich>=13.9,<15",
   "typer>=0.15,<1",
+  "websockets>=13,<16",
 ]
 
 [project.urls]
@@ -43,6 +44,7 @@ dev = [
 
 [project.scripts]
 vlmux = "vlmux.cli.app:main"
+vlmux-mcp = "vlmux.mcp.server:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/vlmux"]

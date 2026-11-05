@@ -1,0 +1,8 @@
+# Calculator multiplication benchmark.
+name = "calculator_multiplication"
+task = "Open Calculator and calculate 1729 multiplied by 47"
+max_steps = 20
+
+[success]
+type = "screen_contains_text"
+value = "81263"

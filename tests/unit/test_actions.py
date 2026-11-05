@@ -110,4 +110,4 @@ def test_action_schema_has_type_discriminator() -> None:
     schema = action_json_schema()
 
     assert schema["discriminator"]["propertyName"] == "type"
-    assert len(schema["oneOf"]) == 21
+    assert len(schema["oneOf"]) == 22

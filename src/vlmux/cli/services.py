@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 
+from vlmux.browser.executor import BrowserExecutor
+from vlmux.browser.session import BrowserSession
 from vlmux.config import Settings
 from vlmux.core import RuntimeResult, Task
 from vlmux.events import EventBus
@@ -15,12 +17,21 @@ from vlmux.models import (
     load_provider_catalog,
     resolve_model_reference,
 )
-from vlmux.observation import HybridObserver, Observer, ScreenObserver, SetOfMarksObserver
+from vlmux.observation import (
+    A11yObserver,
+    HybridObserver,
+    Observer,
+    OCRObserver,
+    ScreenObserver,
+    SetOfMarksObserver,
+)
 from vlmux.perception import (
     CaptureOptions,
     RectangleDetector,
     create_screen_capture_provider,
 )
+from vlmux.perception.a11y import WindowsA11yProvider
+from vlmux.perception.ocr import PytesseractOCRProvider
 from vlmux.policy import PolicyEngine, RiskLevel
 from vlmux.runtime import ConfirmationHandler, Runtime, RuntimeConfig
 from vlmux.trace import TraceRecorder
@@ -44,16 +55,20 @@ def build_observer(settings: Settings) -> Observer:
     )
     if settings.perception_mode == "set_of_marks":
         return SetOfMarksObserver(base, RectangleDetector())
+    if settings.perception_mode == "ocr":
+        return OCRObserver(base, PytesseractOCRProvider())
+    if settings.perception_mode == "a11y":
+        return A11yObserver(base, WindowsA11yProvider())
     if settings.perception_mode == "hybrid":
-        return HybridObserver(base, RectangleDetector())
+        return HybridObserver(base, RectangleDetector(), PytesseractOCRProvider())
     return base
 
 
-def build_browser_executor(settings: Settings):  # type: ignore[no-untyped-def]
+def build_browser_executor(settings: Settings) -> BrowserExecutor | None:
     """Build a browser executor when a CDP endpoint is configured."""
     if not settings.browser_cdp_url:
         return None
-    from vlmux.browser import BrowserExecutor, BrowserSession, WebSocketCDPTransport
+    from vlmux.browser.session import WebSocketCDPTransport
 
     return BrowserExecutor(BrowserSession(WebSocketCDPTransport(settings.browser_cdp_url)))
 

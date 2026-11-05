@@ -51,7 +51,7 @@ class Settings(BaseModel):
     screenshot_max_height: int | None = Field(default=1440, ge=1)
     screenshot_format: Literal["png", "jpeg"] = "png"
     screenshot_quality: int = Field(default=85, ge=1, le=100)
-    perception_mode: Literal["raw", "set_of_marks", "hybrid"] = "raw"
+    perception_mode: Literal["raw", "ocr", "a11y", "dom", "set_of_marks", "hybrid"] = "raw"
     loop_threshold: int = Field(default=5, ge=2, le=100)
     record_runs: bool = False
     runs_dir: str = "runs"

@@ -41,6 +41,12 @@ dev = [
   "ruff>=0.9,<1",
   "types-pynput>=1.8,<2",
 ]
+ocr = [
+  "pytesseract>=0.3.13,<1",
+]
+browser = [
+  "websockets>=13,<16",
+]
 
 [project.scripts]
 vlmux = "vlmux.cli.app:main"

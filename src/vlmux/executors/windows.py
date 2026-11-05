@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import ctypes
 import subprocess
+from ctypes import wintypes
 from time import sleep
 from typing import Any, Protocol
 
 from vlmux.exceptions import ActionExecutionError
 from vlmux.executors.base import ComputerExecutor, MouseButton
+from vlmux.perception.a11y import WindowsWindowListProvider
 from vlmux.platforms.windows import enable_dpi_awareness
 
 
@@ -170,15 +173,53 @@ class PynputInputBackend:
         )
 
 
+class WindowsFocusBackend:
+    """Win32 focus/close helpers used by tests via dependency injection."""
+
+    def __init__(self, user32: Any) -> None:
+        self._user32 = user32
+
+    def focus(self, hwnd: int) -> None:
+        """Show and foreground a window handle."""
+        self._user32.ShowWindow(hwnd, 9)
+        self._user32.SetForegroundWindow(hwnd)
+
+    def close(self, hwnd: int) -> None:
+        """Post WM_CLOSE to a window handle."""
+        self._user32.PostMessageW(hwnd, 0x0010, 0, 0)
+
+
+def _default_focus_backend() -> WindowsFocusBackend:
+    user32 = vars(ctypes)["WinDLL"]("user32", use_last_error=True)
+    user32.SetForegroundWindow.argtypes = (wintypes.HWND,)
+    user32.SetForegroundWindow.restype = wintypes.BOOL
+    user32.ShowWindow.argtypes = (wintypes.HWND, ctypes.c_int)
+    user32.ShowWindow.restype = wintypes.BOOL
+    user32.PostMessageW.argtypes = (
+        wintypes.HWND,
+        wintypes.UINT,
+        wintypes.WPARAM,
+        wintypes.LPARAM,
+    )
+    user32.PostMessageW.restype = wintypes.BOOL
+    return WindowsFocusBackend(user32)
+
+
 class WindowsExecutor(ComputerExecutor):
     """Execute desktop input on Windows while keeping pynput isolated."""
 
-    def __init__(self, *, backend: InputBackend | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        backend: InputBackend | None = None,
+        window_provider: Any | None = None,
+    ) -> None:
         enable_dpi_awareness()
         try:
             self._backend = backend or PynputInputBackend()
         except Exception as error:
             raise ActionExecutionError("unable to initialize Windows input control") from error
+        self._window_provider = window_provider
 
     async def click(self, x: int, y: int, *, button: MouseButton = "left") -> None:
         await self._call_backend("click", x, y, button, 1, 0)
@@ -240,3 +281,37 @@ class WindowsExecutor(ComputerExecutor):
             await asyncio.to_thread(method, *arguments)
         except Exception as error:
             raise ActionExecutionError(f"Windows input operation '{method_name}' failed") from error
+
+    async def focus_window(self, window_id: str | None, title: str | None) -> None:
+        """Focus a window by id or title through Win32."""
+        await asyncio.to_thread(self._focus_window_sync, window_id, title)
+
+    async def close_window(self, window_id: str | None, title: str | None) -> None:
+        """Close a window by id or title through Win32."""
+        await asyncio.to_thread(self._close_window_sync, window_id, title)
+
+    def _resolve_window(self, window_id: str | None, title: str | None) -> int:
+        provider = self._window_provider or WindowsWindowListProvider()
+        windows = provider.list_windows()
+        for window in windows:
+            if window.id is None:
+                continue
+            if window_id and window.id == str(window_id):
+                return int(window.id)
+            if title and title.casefold() in (window.title or "").casefold():
+                return int(window.id)
+        raise ActionExecutionError(f"window not found: id={window_id} title={title}")
+
+    def _focus_window_sync(self, window_id: str | None, title: str | None) -> None:
+        try:
+            backend = _default_focus_backend()
+        except (AttributeError, KeyError) as error:
+            raise ActionExecutionError("focus_window requires Windows") from error
+        backend.focus(self._resolve_window(window_id, title))
+
+    def _close_window_sync(self, window_id: str | None, title: str | None) -> None:
+        try:
+            backend = _default_focus_backend()
+        except (AttributeError, KeyError) as error:
+            raise ActionExecutionError("close_window requires Windows") from error
+        backend.close(self._resolve_window(window_id, title))

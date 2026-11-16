@@ -2,55 +2,116 @@
 
 **Give any vision-language model a computer.**
 
-VLMux is a model-agnostic computer-use runtime under active development. It will connect
-vision-language models to desktop and browser environments through a common perception and
-action protocol.
+[![CI](https://github.com/MohamedRF/VLMux/actions/workflows/ci.yml/badge.svg)](https://github.com/MohamedRF/VLMux/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
+
+VLMux is a model-agnostic computer-use runtime. It connects vision-language models (VLMs)
+to desktop and browser environments through a single, typed perception-and-action protocol:
 
 ```text
 model → VLMux → browser / desktop
 ```
 
-## Current status
+The model proposes actions; VLMux validates them against the VAP protocol, evaluates local
+policy, and only then executes them on the machine. No model ever gets raw, unchecked access
+to the OS.
 
-- ✅ Repository foundation, typed core domain models, and VAP 1.0 action schemas
-- ✅ Configuration precedence and foundational `version`, `doctor`, and `config` commands
-- ✅ Screen capture, image resizing/encoding, coordinate mapping, and Windows desktop execution
-- ✅ OpenAI-compatible and native Anthropic vision-model adapters, provider catalog, and custom APIs
-- ✅ Bounded runtime loop, policy checks, dry-run, events, and polished CLI
-- ✅ Set-of-Marks perception with `click_mark` resolution (perception mode: `set_of_marks` / `hybrid`)
-- ✅ Browser mode over CDP (navigate, semantic DOM clicks, DOM inspection; configure `browser_cdp_url`)
-- ✅ MCP server (`vlmux mcp` / `vlmux-mcp`), local REST API (`vlmux serve`), and Python SDK (`VLMux`, `Computer`)
-- ✅ Opt-in trace recording and `vlmux replay`; TOML benchmarks with verifiers and `vlmux benchmark`
-- ✅ macOS and Linux desktop executors alongside Windows
-- ✅ Accessibility-tree snapshots with element refs (`perception_mode = "ui_tree"`, Windows UIA; `pip install vlmux[uia]`)
-- ✅ Agent-facing JSON envelope commands: `vlmux snapshot`, `vlmux click @ref`, `vlmux set-value @ref`
+## Features
 
-Windows desktop input is available through an isolated executor. MSS-based full-screen and monitor
-capture are available where the operating system provides an interactive display. Active-window
-capture is currently Windows-only. Browser mode requires a Chrome instance with CDP exposed
-(e.g. `chrome --remote-debugging-port=9222`) and `browser_cdp_url` set to its WebSocket endpoint.
+- **Provider-agnostic model adapters** — OpenAI-compatible and native Anthropic protocols, with
+  presets for OpenAI, Anthropic, OpenRouter, Google Gemini, Hugging Face, Groq, Together AI,
+  Fireworks AI, DeepInfra, Mistral AI, xAI, Ollama, vLLM and llama.cpp. Custom endpoints and
+  custom protocols are supported.
+- **Typed action protocol (VAP 1.0)** — every model response is JSON-extracted, Pydantic-validated,
+  coordinate-normalized and bounds-checked before it reaches an executor.
+- **Desktop executors for Windows, macOS and Linux** — click, double-click, right-click, move,
+  type, keys, hotkeys, scroll, drag and wait. Absolute coordinates handle negative
+  virtual-desktop positions used by left/upper monitors.
+- **Multiple perception modes** — raw screenshots, Set-of-Marks (`set_of_marks`, `hybrid`),
+  OCR (`ocr`), accessibility tree (`a11y`), and a stable element-ref mode (`ui_tree`, Windows UIA).
+- **Browser mode over CDP** — navigate, go back/forward, reload, and semantic DOM clicks that
+  prefer elements over pixel coordinates.
+- **Agent-facing interfaces** — MCP server (`vlmux mcp` / `vlmux-mcp`), local REST API
+  (`vlmux serve`), Python SDK (`VLMux`, `Computer`), and JSON-envelope CLI commands
+  (`vlmux snapshot`, `vlmux click @ref`, `vlmux set-value @ref`).
+- **Bounded runtime loop** — step/time/failure budgets, policy evaluation with
+  confirmation-required action classes, dry-run mode, and repair/network retries.
+- **Safety by default** — schema + coordinate + policy validation on every action;
+  `--offline` restricts model URLs to localhost; secrets are redacted from CLI output and stored
+  with user-only permissions.
+- **Replay and benchmarks** — opt-in run recording (`vlmux replay`) and TOML-defined benchmarks
+  with verifiers (`vlmux benchmark`).
+
+## Requirements
+
+- Python **3.12** or newer
+- An interactive display for desktop control (mss-based capture)
+- A Chrome/Chromium instance with CDP exposed for browser mode
+- An image-capable model endpoint (local or hosted)
+
+## Installation
+
+```bash
+git clone https://github.com/MohamedRF/VLMux.git
+cd VLMux
+python -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+python -m pip install -e ".[dev]"
+```
+
+Optional extras:
+
+| Extra     | Purpose                                        |
+| --------- | ---------------------------------------------- |
+| `uia`     | Windows accessibility-tree snapshots (`ui_tree`) — `pip install vlmux[uia]` |
+| `ocr`     | OCR perception mode                            |
+| `browser` | CDP browser mode                               |
 
 ## Quick start
 
-VLMux requires Python 3.12 or newer.
-
 ```bash
-python -m venv .venv
-.venv/Scripts/python -m pip install -e ".[dev]"  # Windows
 vlmux --help
 vlmux version
-vlmux doctor
-vlmux config show
-vlmux screenshot --output screenshot.png
+vlmux doctor                 # environment and configuration self-check
 vlmux models list
+vlmux screenshot --output screenshot.png
 ```
 
-On macOS or Linux, activate the environment from `.venv/bin/activate` before installing.
+Connect a model — the API key is prompted for without echoing it, and VLMux sends a small
+image request to verify the model actually answers about images before saving anything:
+
+```bash
+vlmux models add --provider openrouter --model google/gemini-2.5-pro
+```
+
+Run a task (a local model needs no network access beyond localhost):
+
+```bash
+vlmux run --model ollama/qwen3-vl "Open Calculator and calculate 1729 multiplied by 47"
+```
+
+Inspect one proposed action without moving the mouse or typing:
+
+```bash
+vlmux run --dry-run --model ollama/qwen3-vl "Open Calculator"
+```
+
+## Documentation
+
+- [Architecture](docs/architecture.md) — runtime loop, components and data flow
+- [Safety model](docs/safety.md) — validation, policy classes and threat model
+- [Protocol (VAP)](docs/protocol.md) — action schema and `schemas/`
+- [Model adapters](docs/model-adapters.md) — provider presets and custom endpoints
+- [Accessibility refs](docs/a11y-refs.md) — `ui_tree` snapshots and `click_ref` workflows
+- [MCP server](docs/mcp.md) — tools exposed to MCP clients
+- [Benchmarks](docs/benchmarks.md) — defining and running benchmark suites
+- [CHANGELOG](CHANGELOG.md) — notable changes
 
 ## Configuration
 
-Configuration precedence is CLI override, environment variable, TOML file, then default.
-The default path is shown with `vlmux config path`.
+Precedence: CLI flag → environment variable → TOML file → built-in default.
+Show the active file with `vlmux config path`.
 
 ```toml
 [model]
@@ -77,118 +138,37 @@ confirm = ["sensitive", "external_side_effect", "destructive"]
 deny = []
 ```
 
-Supported environment variables are `VLMUX_MODEL`, `VLMUX_PROVIDER`, `VLMUX_API_KEY`,
-`VLMUX_BASE_URL`, `VLMUX_MAX_STEPS`, and `VLMUX_OFFLINE`. Secret values are redacted from CLI
-output.
+Environment variables: `VLMUX_MODEL`, `VLMUX_PROVIDER`, `VLMUX_API_KEY`, `VLMUX_BASE_URL`,
+`VLMUX_MAX_STEPS`, `VLMUX_OFFLINE`. Secrets are redacted from CLI output.
 
-## Models and runtime
-
-VLMux includes provider presets for OpenAI, Anthropic, OpenRouter, Google Gemini, Hugging Face,
-Groq, Together AI, Fireworks AI, DeepInfra, Mistral AI, xAI, Ollama, vLLM, and llama.cpp. Custom
-providers can use either the OpenAI-compatible Chat Completions protocol or the Anthropic Messages
-protocol. The selected model must support image input; `models add` verifies that before saving it.
-
-```bash
-# Connect a preset. The key is prompted for without echoing it. VLMux sends a small image request
-# and saves the credential only if this exact model correctly interprets the image.
-vlmux models add --provider openrouter --model google/gemini-2.5-pro
-
-# Read a key from an environment variable instead of an interactive prompt.
-vlmux models add --provider groq --model MODEL_ID --api-key-env GROQ_API_KEY
-
-# Add a custom OpenAI-compatible provider.
-vlmux models add --provider my-vlm --name "My VLM" \
-  --base-url https://models.example/v1 --model vision-model
-
-# Add a custom Anthropic-compatible gateway or proxy.
-vlmux models add --provider claude-gateway --name "Claude Gateway" \
-  --protocol anthropic --base-url https://models.example --model vision-model
-
-# Some OpenAI-compatible models do not implement response_format.
-vlmux models add --provider minimal-vlm --base-url https://models.example/v1 \
-  --model vision-model --no-json-mode
-
-# A local custom endpoint can explicitly omit credentials.
-vlmux models add --provider local-vlm --base-url http://127.0.0.1:8000/v1 \
-  --model vision-model --no-api-key
-
-# Local Ollama; no API key or network service outside localhost is required.
-vlmux run --model ollama/qwen3-vl "Open Calculator and calculate 1729 multiplied by 47"
-
-# Other local OpenAI-compatible VLM servers.
-vlmux run --model vllm/served-model-name "Open Calculator"
-vlmux run --model llamacpp/served-model-name "Open Calculator"
-
-# Inspect one proposed action without moving the mouse or typing.
-vlmux run --dry-run --model ollama/qwen3-vl "Open Calculator"
-
-# OpenRouter model names can retain their provider/model path.
-set VLMUX_API_KEY=...
-vlmux run --model openrouter/google/gemini-model "Open Calculator"
-
-vlmux models list
-vlmux models test --model ollama/qwen3-vl
-```
-
-Saved credentials are kept in `auth.json` beside the platform-specific configuration file, not in
-`config.toml`. Custom provider definitions are kept separately in `providers.json`. Both files are
-created with user-only file permissions where the operating system supports POSIX permissions.
-`VLMUX_API_KEY` continues to override a saved credential. Treat `auth.json` as a secret and never
-commit or share it. The verification call contacts the selected provider with a randomly selected
-solid-color image and may consume a small number of tokens.
-
-`--offline` rejects model URLs other than localhost. Model responses undergo JSON extraction,
-Pydantic schema validation, coordinate normalization, coordinate bounds validation, and policy
-evaluation before execution. Repair and network retries are bounded.
-
-## Screen capture
-
-```bash
-# Capture the virtual desktop with configured resize limits.
-vlmux screenshot --output desktop.png
-
-# Capture physical monitor 1 as JPEG.
-vlmux screenshot --monitor 1 --format jpeg --quality 85 --output monitor.jpg
-
-# Windows: capture the foreground window.
-vlmux screenshot --active-window --output active-window.png
-```
-
-The command refuses to overwrite an existing file unless `--force` is supplied. The standalone
-screenshot and observe commands perform no network access. Runtime screenshots are sent only to
-the explicitly configured model provider.
-
-## Desktop executor
-
-The Windows, macOS, and Linux executors implement click, double-click, right-click, pointer
-movement, typing, key presses, hotkeys, scrolling, dragging, and asynchronous wait actions. OS
-input is isolated behind `ComputerExecutor`; tests use an injected backend and never move the CI
-machine's input devices. Absolute coordinates support negative virtual-desktop positions used by
-left and upper monitors. Shell-free application launching supports the initial
-calculator/text-editor workflow.
+Saved credentials live in `auth.json` beside the platform-specific configuration file — never in
+`config.toml` — and custom provider definitions in `providers.json`. Both are created with
+user-only permissions where the OS supports them. `VLMUX_API_KEY` overrides a saved credential.
+Treat `auth.json` as a secret; never commit or share it.
 
 ## Perception modes
 
 ```toml
 [runtime]
-perception_mode = "raw"  # or "set_of_marks" or "hybrid" or "ocr" or "a11y" or "ui_tree"
+perception_mode = "raw"  # raw | set_of_marks | hybrid | ocr | a11y | ui_tree
 ```
 
-`set_of_marks` draws numbered red badges over detected UI elements; the model may then answer
-`{"type": "click_mark", "mark": 3}` and the runtime resolves it to coordinates. `hybrid` adds OCR
-text alongside marks. `ui_tree` (Windows) tags every interactive accessibility element with a
-stable ref like `@s1a2b3:e8`; the model can then act without pixels:
+- `set_of_marks` draws numbered red badges over detected UI elements; the model may then answer
+  `{"type": "click_mark", "mark": 3}` and the runtime resolves it to coordinates.
+- `hybrid` adds OCR text alongside marks.
+- `ui_tree` (Windows, requires `vlmux[uia]`) tags every interactive accessibility element with a
+  stable ref such as `@s1a2b3:e8`. Ref actions invoke the UIA element directly — the pointer does
+  not move and focus is not taken — and fail closed with `stale_ref` when the UI changed instead
+  of clicking the wrong thing:
 
-```json
-{"type": "click_ref", "ref": "@s1a2b3:e8"}
-{"type": "set_value_ref", "ref": "@s1a2b3:e3", "value": "Ada"}
-```
+  ```json
+  {"type": "click_ref", "ref": "@s1a2b3:e8"}
+  {"type": "set_value_ref", "ref": "@s1a2b3:e3", "value": "Ada"}
+  ```
 
-Ref actions invoke the UIA element directly — the pointer does not move and focus is not taken —
-and fail closed with `stale_ref` when the UI changed, instead of clicking the wrong thing.
-See [docs/a11y-refs.md](docs/a11y-refs.md) for the full workflow, including the one-shot
-`vlmux snapshot` / `vlmux click` / `vlmux set-value` commands and the MCP `desktop_snapshot`,
-`desktop_click`, and `desktop_set_value` tools. `vlmux[uia]` is required for `ui_tree`.
+  See [docs/a11y-refs.md](docs/a11y-refs.md) for the one-shot `vlmux snapshot` / `vlmux click` /
+  `vlmux set-value` commands and the MCP `desktop_snapshot`, `desktop_click`, `desktop_set_value`
+  tools.
 
 ## Browser mode
 
@@ -197,15 +177,15 @@ See [docs/a11y-refs.md](docs/a11y-refs.md) for the full workflow, including the 
 browser_cdp_url = "ws://127.0.0.1:9222/devtools/page/1"
 ```
 
-Start Chrome with `--remote-debugging-port=9222`, then run tasks. Browser navigation actions
-(`browser_navigate`, `browser_back`, `browser_forward`, `browser_reload`) route to CDP; semantic
-element clicks prefer DOM over pixel coordinates.
+Start Chrome with `--remote-debugging-port=9222`, then run tasks. `browser_navigate`,
+`browser_back`, `browser_forward` and `browser_reload` route to CDP; semantic element clicks
+prefer the DOM over pixel coordinates.
 
-## MCP, REST API, and Python SDK
+## MCP, REST API and Python SDK
 
 ```bash
-vlmux mcp            # MCP server over stdio (also: vlmux-mcp)
-vlmux serve          # REST API on http://127.0.0.1:8765
+vlmux mcp      # MCP server over stdio (also: vlmux-mcp)
+vlmux serve    # REST API on http://127.0.0.1:8765
 ```
 
 ```python
@@ -231,35 +211,33 @@ vlmux replay RUN_ID
 vlmux benchmark benchmarks --model ollama/qwen3-vl --model openrouter/google/gemini-2.5-pro
 ```
 
-## Architecture
+## Architecture and safety
 
-The core is provider-independent. Model adapters emit validated VAP actions; policies
-approve those actions; platform executors will be solely responsible for OS interaction. See
-[docs/architecture.md](docs/architecture.md), [docs/model-adapters.md](docs/model-adapters.md),
-[docs/safety.md](docs/safety.md), and the exported schemas in [`schemas/`](schemas/).
+The core is provider-independent: model adapters emit validated VAP actions, the policy engine
+gates them, and platform executors perform them. VLMux treats model output as untrusted input —
+every action must pass schema, coordinate and local-policy validation. Sensitive,
+external-side-effect (launching applications, browser navigation) and destructive action classes
+require confirmation by default. Screenshots can contain sensitive information; choose local
+Ollama with `--offline` when they must not leave the machine.
 
-## Safety and privacy
-
-VLMux treats model output as untrusted input. Actions must pass schema, coordinate, and local
-policy validation. Sensitive, external-side-effect (launching applications, navigating the browser),
-and destructive classes require confirmation by default. Screenshots
-can contain sensitive information; choose local Ollama plus `--offline` when they must not leave
-the machine.
+Tests never move the CI machine's input devices: OS input is isolated behind `ComputerExecutor`
+with an injected backend.
 
 ## Development
 
 ```bash
 ruff format --check .
 ruff check .
-mypy src
+mypy src            # or: mypy --platform linux src, to match CI on Linux
 pytest
 ```
 
-Contributions are welcome; read [CONTRIBUTING.md](CONTRIBUTING.md) and
-[SECURITY.md](SECURITY.md) first.
+Contributions are welcome — read [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md)
+first. Generated schemas must be refreshed with `python scripts/export_schemas.py` after protocol
+changes.
 
-Repository owner and maintainer: [MohamedRF](https://github.com/MohamedRF).
+Maintainer: [MohamedRF](https://github.com/MohamedRF).
 
 ## License
 
-MIT
+[MIT](LICENSE)

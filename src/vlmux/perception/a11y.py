@@ -73,6 +73,10 @@ class WindowsWindowListProvider:
                 left, top = rectangle.left, rectangle.top
                 width = rectangle.right - rectangle.left
                 height = rectangle.bottom - rectangle.top
+            # Skip windows whose bounds are unknown or degenerate (e.g.
+            # minimized); they are not consistently clickable targets.
+            if width is None or height is None or width <= 0 or height <= 0:
+                return True
             windows.append(
                 WindowInfo(
                     id=str(hwnd),

@@ -41,7 +41,7 @@ def test_version_command() -> None:
     result = runner.invoke(app, ["version"])
 
     assert result.exit_code == 0
-    assert "VLMux 0.1.0" in result.stdout
+    assert "VLMux 0.2.0" in result.stdout
 
 
 def test_config_show_redacts_api_key(tmp_path: Path) -> None:

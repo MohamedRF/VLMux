@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import AsyncIterator
 from typing import Any, Protocol
 
 from vlmux.exceptions import ActionExecutionError
@@ -82,13 +81,48 @@ class BrowserSession:
         await self._transport.call("Page.enable")
         await self._transport.call("Page.navigate", {"url": url})
 
+    async def _history_entry(self, delta: int) -> int | None:
+        """Return the entry id ``delta`` steps from the current history position."""
+        history = await self._transport.call("Page.getNavigationHistory")
+        entries = (history or {}).get("entries", []) if isinstance(history, dict) else []
+        try:
+            current = int((history or {}).get("currentIndex", 0))
+        except (TypeError, ValueError):
+            return None
+        target = current + delta
+        if target < 0 or target >= len(entries):
+            return None
+        entry = entries[target]
+        entry_id = entry.get("id") if isinstance(entry, dict) else None
+        try:
+            return int(entry_id) if entry_id is not None else None
+        except (TypeError, ValueError):
+            return None
+
     async def back(self) -> None:
-        """Navigate backward in history."""
-        await self._transport.call("Page.navigateToHistoryEntry", {"entryIndex": 0})
+        """Navigate backward in history; no-op at the first entry."""
+        entry_id = await self._history_entry(-1)
+        if entry_id is not None:
+            await self._transport.call("Page.navigateToHistoryEntry", {"entryId": entry_id})
 
     async def forward(self) -> None:
-        """Navigate forward in history."""
-        await self._transport.call("Page.navigateToHistoryEntry", {"entryIndex": 0})
+        """Navigate forward in history; no-op at the newest entry."""
+        entry_id = await self._history_entry(1)
+        if entry_id is not None:
+            await self._transport.call("Page.navigateToHistoryEntry", {"entryId": entry_id})
+
+    async def viewport(self) -> tuple[int, int]:
+        """Return the current window width and height in pixels."""
+        result = await self._transport.call("Browser.getWindowForTarget")
+        bounds = (result or {}).get("bounds", {}) or {}
+        try:
+            width = int(bounds.get("width", 0))
+            height = int(bounds.get("height", 0))
+        except (TypeError, ValueError):
+            width = height = 0
+        if width > 0 and height > 0:
+            return width, height
+        return 1920, 1080
 
     async def reload(self, *, bypass_cache: bool = False) -> None:
         """Reload the current page, optionally bypassing the cache."""
@@ -205,11 +239,3 @@ class BrowserSession:
     async def aclose(self) -> None:
         """Release the underlying transport."""
         await self._transport.aclose()
-
-
-async def iter_events(transport: Any) -> AsyncIterator[dict[str, Any]]:
-    """Yield lifecycle events if the transport exposes a subscription API."""
-    if not hasattr(transport, "events"):
-        return
-    async for event in transport.events():
-        yield event

@@ -39,14 +39,15 @@ class AnthropicAdapter(HTTPModelAdapter):
         started = perf_counter()
         last_error: ModelResponseError | None = None
         for attempt in range(self.config.repair_attempts + 1):
-            payload = await self._post_messages(messages)
-            raw_content, usage = self._extract_content(payload)
             try:
+                payload = await self._post_messages(messages)
+                raw_content, usage = self._extract_content(payload)
                 action = parse_model_action(raw_content)
                 action = normalize_action_coordinates(action, observation.screen)
             except (ActionValidationError, ModelResponseError) as error:
                 last_error = ModelResponseError(str(error))
-                if attempt >= self.config.repair_attempts:
+                truncated = isinstance(error, ModelResponseError) and "truncat" in str(error)
+                if truncated or attempt >= self.config.repair_attempts:
                     break
                 messages.extend(
                     [
@@ -158,7 +159,7 @@ class AnthropicAdapter(HTTPModelAdapter):
             "/v1/messages",
             json={
                 "model": self.config.model,
-                "max_tokens": 1024,
+                "max_tokens": 2048,
                 "system": build_system_prompt(),
                 "messages": messages,
                 "temperature": 0,
@@ -185,6 +186,11 @@ class AnthropicAdapter(HTTPModelAdapter):
         blocks = payload.get("content")
         if not isinstance(blocks, list):
             raise ModelResponseError("model response omitted assistant content")
+        stop_reason = payload.get("stop_reason")
+        if stop_reason == "max_tokens":
+            raise ModelResponseError(
+                "model output was truncated at max_tokens; request shorter output or raise the cap"
+            )
         text = "".join(
             block["text"]
             for block in blocks

@@ -49,6 +49,8 @@ class CredentialStore:
         api_key: SecretStr | None = None,
     ) -> None:
         records = self._records()
+        existing = records.get(provider)
+        old_key = existing.get("api_key") if isinstance(existing, dict) else None
         record: dict[str, object] = {
             "verified_model": model,
             "accepts_image_input": True,
@@ -56,6 +58,9 @@ class CredentialStore:
         }
         if api_key is not None:
             record["api_key"] = api_key.get_secret_value()
+        elif isinstance(old_key, str):
+            # Re-verifying without a new key must preserve the stored key.
+            record["api_key"] = old_key
         records[provider] = record
         _write_json_atomic(self.path, {"version": 1, "providers": records})
 

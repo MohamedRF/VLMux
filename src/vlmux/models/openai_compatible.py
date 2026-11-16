@@ -40,14 +40,15 @@ class OpenAICompatibleAdapter(HTTPModelAdapter):
         started = perf_counter()
         last_error: ModelResponseError | None = None
         for attempt in range(self.config.repair_attempts + 1):
-            response = await self._post_chat(messages)
-            raw_content, usage = self._extract_content(response)
             try:
+                response = await self._post_chat(messages)
+                raw_content, usage = self._extract_content(response)
                 action = parse_model_action(raw_content)
                 action = normalize_action_coordinates(action, observation.screen)
             except (ActionValidationError, ModelResponseError) as error:
                 last_error = ModelResponseError(str(error))
-                if attempt >= self.config.repair_attempts:
+                truncated = isinstance(error, ModelResponseError) and "truncat" in str(error)
+                if truncated or attempt >= self.config.repair_attempts:
                     break
                 messages.extend(
                     [
@@ -176,9 +177,15 @@ class OpenAICompatibleAdapter(HTTPModelAdapter):
     def _extract_content(payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
         try:
             choices = payload["choices"]
-            content = choices[0]["message"]["content"]
-        except (KeyError, IndexError, TypeError) as error:
+            choice = choices[0]
+            finish_reason = choice.get("finish_reason")
+            content = choice["message"]["content"]
+        except (KeyError, IndexError, TypeError, AttributeError) as error:
             raise ModelResponseError("model response omitted assistant content") from error
+        if isinstance(finish_reason, str) and finish_reason == "length":
+            raise ModelResponseError(
+                "model output was truncated at max_tokens; request shorter output or raise the cap"
+            )
         if not isinstance(content, str):
             raise ModelResponseError("model assistant content was not text")
         usage = payload.get("usage", {})

@@ -8,10 +8,16 @@ from time import perf_counter
 from typing import Literal
 
 from vlmux.core import ActionResult
-from vlmux.exceptions import ActionExecutionError
+from vlmux.exceptions import (
+    ActionExecutionError,
+    ActionValidationError,
+    RefUnavailableError,
+    error_code,
+)
 from vlmux.protocol import (
     Action,
     ClickAction,
+    ClickRefAction,
     CloseWindowAction,
     DoubleClickAction,
     DragAction,
@@ -22,6 +28,7 @@ from vlmux.protocol import (
     OpenAppAction,
     RightClickAction,
     ScrollAction,
+    SetValueRefAction,
     TypeAction,
     WaitAction,
 )
@@ -43,6 +50,27 @@ class ComputerExecutor(ABC):
                 success=False,
                 duration_ms=(perf_counter() - started) * 1000,
                 error=str(error),
+                error_code=error_code(error),
+            )
+        except ActionValidationError as error:
+            # Stale or ambiguous element references land here; the model can
+            # recover by taking a fresh snapshot.
+            return ActionResult(
+                action_id=action.id,
+                success=False,
+                duration_ms=(perf_counter() - started) * 1000,
+                error=str(error),
+                error_code=error_code(error),
+            )
+        except Exception as error:
+            # Defense-in-depth: a buggy backend must produce a failed result,
+            # never an unhandled exception out of the task loop.
+            return ActionResult(
+                action_id=action.id,
+                success=False,
+                duration_ms=(perf_counter() - started) * 1000,
+                error=f"unexpected executor failure ({type(error).__name__}): {error}",
+                error_code="internal_error",
             )
         return ActionResult(
             action_id=action.id,
@@ -89,6 +117,10 @@ class ComputerExecutor(ABC):
             await self.focus_window(action.window_id, action.title)
         elif isinstance(action, CloseWindowAction):
             await self.close_window(action.window_id, action.title)
+        elif isinstance(action, ClickRefAction):
+            await self.click_ref(action.ref, button=action.button, clicks=action.clicks)
+        elif isinstance(action, SetValueRefAction):
+            await self.set_value_ref(action.ref, action.value)
         else:
             raise ActionExecutionError(
                 f"action type '{action.type}' is not supported by the desktop executor"
@@ -161,6 +193,28 @@ class ComputerExecutor(ABC):
     async def close_window(self, window_id: str | None, title: str | None) -> None:
         """Close a matching window."""
         raise ActionExecutionError("close_window is not supported by this executor")
+
+    async def click_ref(self, ref: str, *, button: MouseButton = "left", clicks: int = 1) -> None:
+        """Invoke an accessibility-tree element reference (headless).
+
+        Implementations must resolve ``ref`` against the registry used when the
+        reference was minted and invoke the control without moving the pointer.
+        The default raises :class:`RefUnavailableError`.
+        """
+        raise RefUnavailableError(
+            "ref-based actions require an accessibility backend; "
+            "install vlmux[uia] on Windows and run with the ui_tree perception mode"
+        )
+
+    async def set_value_ref(self, ref: str, value: str) -> None:
+        """Set an accessibility-tree element's value (headless).
+
+        The default raises :class:`RefUnavailableError`.
+        """
+        raise RefUnavailableError(
+            "ref-based actions require an accessibility backend; "
+            "install vlmux[uia] on Windows and run with the ui_tree perception mode"
+        )
 
     async def list_windows(self) -> list[dict[str, object]]:
         """List windows known to this executor, if discoverable."""

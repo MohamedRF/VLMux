@@ -9,6 +9,7 @@ can supply elements without touching the runtime.
 from __future__ import annotations
 
 import base64
+import math
 from io import BytesIO
 from typing import Any, Protocol
 
@@ -57,7 +58,15 @@ class RectangleElement:
     ) -> None:
         if width <= 0 or height <= 0:
             raise ValueError("element dimensions must be positive")
-        self.x = max(0, x)
+        if x < 0:
+            # Clip the part that hangs off the left/top edge so the bounds
+            # stay a true intersection with the image instead of shifting
+            # the rectangle.
+            width += x
+            x = 0
+            if width <= 0:
+                raise ValueError("element must intersect the image bounds")
+        self.x = x
         self.y = max(0, y)
         self.width = width
         self.height = height
@@ -235,4 +244,10 @@ def resolve_mark(metadata: dict[str, Any], mark: int) -> tuple[int, int]:
     center = entry["center"]
     if not (isinstance(center, list) and len(center) == 2):
         raise ActionValidationError(f"mark {mark} has invalid coordinates")
-    return int(center[0]), int(center[1])
+    try:
+        x, y = int(center[0]), int(center[1])
+    except (TypeError, ValueError):
+        raise ActionValidationError(f"mark {mark} has invalid coordinates") from None
+    if not (math.isfinite(float(center[0])) and math.isfinite(float(center[1]))):
+        raise ActionValidationError(f"mark {mark} has invalid coordinates")
+    return x, y

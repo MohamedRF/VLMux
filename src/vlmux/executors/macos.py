@@ -21,7 +21,11 @@ class MacOSBackend(PynputPosixBackend):
 
     def open_app(self, application: str, arguments: list[str]) -> None:
         name = self._app_aliases.get(application.strip().casefold(), application)
-        command = ["open", "-a", name, *arguments]
+        # ``open`` interprets trailing arguments as files/URLs to open, not
+        # program arguments; ``--args`` switches to forwarding argv.
+        command = ["open", "-a", name]
+        if arguments:
+            command += ["--args", *arguments]
         subprocess.Popen(
             command,
             shell=False,

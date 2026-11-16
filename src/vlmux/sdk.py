@@ -52,9 +52,21 @@ class Computer:
         """Wait for a bounded duration."""
         await self._executor.wait(duration_ms)
 
-    async def open_app(self, application: str) -> None:
+    async def open_app(self, application: str, arguments: list[str] | None = None) -> None:
         """Launch an application without a shell."""
-        await self._executor.open_app(application, [])
+        await self._executor.open_app(application, arguments or [])
+
+    async def click_ref(self, ref: str) -> None:
+        """Invoke an accessibility-tree element by ref (headless).
+
+        Requires an executor built with the UIA backend (e.g. run with
+        ``perception_mode='ui_tree'`` via the runtime instead).
+        """
+        await self._executor.click_ref(ref)
+
+    async def set_value_ref(self, ref: str, value: str) -> None:
+        """Set an accessibility-tree element's value by ref (headless)."""
+        await self._executor.set_value_ref(ref, value)
 
 
 class VLMux:
@@ -73,15 +85,23 @@ class VLMux:
         max_steps: int | None = None,
         dry_run: bool = False,
         events: Any | None = None,
+        confirmation_handler: Any | None = None,
     ) -> None:
         self._model = model
         self._provider = provider
         self._max_steps = max_steps
         self._dry_run = dry_run
         self._events = events
+        self._confirmation_handler = confirmation_handler
 
     async def run(self, task: str) -> RuntimeResult:
-        """Run one computer-use task to completion."""
+        """Run one computer-use task to completion.
+
+        Sensitive, external-side-effect and destructive actions require a
+        confirmation handler; without one they are denied (fail-closed).
+        Pass ``confirmation_handler=`` (an async callable taking
+        ``(action, decision) -> bool``) to approve actions interactively.
+        """
         from vlmux.cli.services import run_task
 
         settings = load_settings(
@@ -96,4 +116,5 @@ class VLMux:
             settings,
             dry_run=self._dry_run,
             events=self._events,
+            confirmation_handler=self._confirmation_handler,
         )

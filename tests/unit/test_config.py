@@ -125,3 +125,38 @@ def test_offline_environment_value_is_parsed(tmp_path: Path) -> None:
     )
 
     assert settings.offline is True
+
+
+def test_default_policy_confirm_includes_external_side_effect(tmp_path: Path) -> None:
+    settings = load_settings(config_path=tmp_path / "missing.toml", environ={})
+
+    assert "external_side_effect" in settings.policy_confirm
+    assert "sensitive" in settings.policy_confirm
+    assert "destructive" in settings.policy_confirm
+
+
+def test_safe_dict_redacts_userinfo_in_urls(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        '[model]\nname = "m"\nprovider = "custom"\nbase_url = "https://user:pass@models.example/v1"\n',
+        encoding="utf-8",
+    )
+    settings = load_settings(config_path=config_path, environ={})
+
+    output = str(settings.safe_dict())
+
+    assert "pass" not in output
+    assert "user" not in output
+    assert "models.example" in output
+
+
+def test_configuration_error_names_failing_fields(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("[runtime]\nmax_steps = 0\n", encoding="utf-8")
+
+    try:
+        load_settings(config_path=config_path, environ={})
+    except ConfigurationError as error:
+        assert "max_steps" in str(error)
+    else:
+        raise AssertionError("expected ConfigurationError")

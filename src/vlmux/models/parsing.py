@@ -78,6 +78,9 @@ def _load_object(candidate: str) -> dict[str, Any] | None:
         parsed = json.loads(candidate)
     except json.JSONDecodeError:
         return None
+    except RecursionError:
+        # Model output with absurd nesting must fail validation, not the run.
+        return None
     return parsed if isinstance(parsed, dict) else None
 
 

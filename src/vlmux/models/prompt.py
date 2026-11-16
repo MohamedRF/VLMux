@@ -18,7 +18,12 @@ def build_system_prompt() -> str:
         "Never invent coordinates outside the image. Use finish only when the task is complete. "
         "Use fail when the task cannot safely continue. "
         "When numbered red labels are visible, you may instead return a click_mark "
-        'action using the visible label number (e.g. type "click_mark").\nVAP JSON Schema:\n'
+        'action using the visible label number (e.g. type "click_mark").\n'
+        "If a ui_tree listing is present, you may act on an element without pixel "
+        'coordinates using click_ref (e.g. {"type": "click_ref", "ref": "@s1a2b3:e8"}) or '
+        "set_value_ref for text fields. Refs belong to the snapshot they came from; "
+        "when a ref action reports error_code stale_ref, take a fresh observation before acting. "
+        "Refs are never guessed or reused across snapshots.\nVAP JSON Schema:\n"
         f"{schema}"
     )
 
@@ -59,6 +64,11 @@ def build_user_prompt(task: Task, observation: Observation, context: AgentContex
             "screenshot": {"width": screen.width, "height": screen.height},
             "recent_steps": history,
             "important_state": context.important_state,
+            **(
+                {"ui_tree": observation.metadata["ui_tree"]}
+                if isinstance(observation.metadata.get("ui_tree"), str)
+                else {}
+            ),
         },
         separators=(",", ":"),
     )

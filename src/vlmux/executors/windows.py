@@ -9,7 +9,10 @@ from ctypes import wintypes
 from time import sleep
 from typing import Any, Protocol
 
-from vlmux.exceptions import ActionExecutionError
+from vlmux.exceptions import (
+    ActionExecutionError,
+    RefUnavailableError,
+)
 from vlmux.executors.base import ComputerExecutor, MouseButton
 from vlmux.perception.a11y import WindowsWindowListProvider
 from vlmux.platforms.windows import enable_dpi_awareness
@@ -147,9 +150,12 @@ class PynputInputBackend:
             "return": "enter",
             "windows": "cmd",
             "win": "cmd",
+            "meta": "cmd",
+            "super": "cmd",
         }
         normalized = aliases.get(normalized, normalized)
-        special_key = getattr(self._keyboard_module.Key, normalized, None)
+        special_members = getattr(self._keyboard_module.Key, "__members__", {})
+        special_key = special_members.get(normalized)
         if special_key is not None:
             return special_key
         if len(key) == 1:
@@ -213,6 +219,8 @@ class WindowsExecutor(ComputerExecutor):
         *,
         backend: InputBackend | None = None,
         window_provider: Any | None = None,
+        ui_registry: Any | None = None,
+        ui_provider: Any | None = None,
     ) -> None:
         enable_dpi_awareness()
         try:
@@ -220,6 +228,8 @@ class WindowsExecutor(ComputerExecutor):
         except Exception as error:
             raise ActionExecutionError("unable to initialize Windows input control") from error
         self._window_provider = window_provider
+        self._ui_registry = ui_registry
+        self._ui_provider = ui_provider
 
     async def click(self, x: int, y: int, *, button: MouseButton = "left") -> None:
         await self._call_backend("click", x, y, button, 1, 0)
@@ -275,6 +285,36 @@ class WindowsExecutor(ComputerExecutor):
     async def open_app(self, application: str, arguments: list[str]) -> None:
         await self._call_backend("open_app", application, arguments)
 
+    async def click_ref(self, ref: str, *, button: MouseButton = "left", clicks: int = 1) -> None:
+        """Invoke one accessibility element by ref (headless, no pointer)."""
+        return await self._ref_action(ref, "click", button=button, clicks=clicks)
+
+    async def set_value_ref(self, ref: str, value: str) -> None:
+        """Set one accessibility element's value by ref (headless)."""
+        return await self._ref_action(ref, "set_value", value=value)
+
+    async def _ref_action(self, ref: str, method_name: str, **kwargs: Any) -> None:
+        registry = self._ui_registry
+        provider = self._ui_provider
+        if registry is None or provider is None:
+            raise RefUnavailableError(
+                "ref-based actions are unavailable in this session; "
+                "run with perception_mode='ui_tree' and vlmux[uia] installed"
+            )
+
+        def _perform() -> None:
+            element = registry.resolve(ref, provider)
+            if method_name == "click":
+                provider.click(
+                    element,
+                    button=kwargs.get("button", "left"),
+                    clicks=kwargs.get("clicks", 1),
+                )
+            else:
+                provider.set_value(element, kwargs.get("value", ""))
+
+        await asyncio.to_thread(_perform)
+
     async def _call_backend(self, method_name: str, *arguments: object) -> None:
         method = getattr(self._backend, method_name)
         try:
@@ -296,10 +336,14 @@ class WindowsExecutor(ComputerExecutor):
         for window in windows:
             if window.id is None:
                 continue
+            try:
+                numeric_id = int(window.id)
+            except (TypeError, ValueError):
+                continue
             if window_id and window.id == str(window_id):
-                return int(window.id)
+                return numeric_id
             if title and title.casefold() in (window.title or "").casefold():
-                return int(window.id)
+                return numeric_id
         raise ActionExecutionError(f"window not found: id={window_id} title={title}")
 
     def _focus_window_sync(self, window_id: str | None, title: str | None) -> None:

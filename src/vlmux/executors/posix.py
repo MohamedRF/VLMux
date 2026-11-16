@@ -127,11 +127,16 @@ class PynputPosixBackend:
             "control": "ctrl",
             "escape": "esc",
             "return": "enter",
-            "cmd": "command",
-            "command": "command",
+            "cmd": "cmd",
+            "command": "cmd",
+            "meta": "cmd",
+            "win": "cmd",
+            "windows": "cmd",
+            "super": "cmd",
         }
         normalized = aliases.get(normalized, normalized)
-        special = getattr(self._keyboard_module.Key, normalized, None)
+        special_members = getattr(self._keyboard_module.Key, "__members__", {})
+        special = special_members.get(normalized)
         if special is not None:
             return special
         if len(key) == 1:

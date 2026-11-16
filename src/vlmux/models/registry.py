@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from urllib.parse import urlparse
 
 from vlmux.config import Settings
 from vlmux.exceptions import ConfigurationError
@@ -35,7 +34,7 @@ class ModelRegistry:
 
     def create(self, config: AdapterConfig) -> ModelAdapter:
         try:
-            factory = self._factories[config.provider]
+            factory = self._factories[config.provider.strip().casefold()]
         except KeyError as error:
             raise ConfigurationError(f"unknown model provider: {config.provider}") from error
         return factory(config)
@@ -74,10 +73,11 @@ def resolve_model_reference(
     provider = provider_override or settings.provider
     if model_reference and "/" in model_reference:
         prefix, remainder = model_reference.split("/", 1)
-        if provider_catalog.get(prefix) is not None and (
-            provider_override is None or provider_override.lower() == prefix
+        normalized_prefix = prefix.casefold()
+        if provider_catalog.get(normalized_prefix) is not None and (
+            provider_override is None or provider_override.casefold() == normalized_prefix
         ):
-            provider = prefix
+            provider = normalized_prefix
             model_reference = remainder
     if not model_reference:
         raise ConfigurationError("no model configured; use --model or VLMUX_MODEL")
@@ -112,5 +112,8 @@ def resolve_model_reference(
 
 
 def _is_local_url(value: str) -> bool:
-    hostname = urlparse(value).hostname
-    return hostname in {"localhost", "127.0.0.1", "::1"}
+    """Return True for loopback URLs, fail-closed otherwise."""
+
+    from vlmux.models.catalog import is_loopback_url
+
+    return is_loopback_url(value)

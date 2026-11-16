@@ -19,7 +19,14 @@ from vlmux.executors.base import ComputerExecutor, MouseButton
 from vlmux.models.base import ModelAdapter, ModelHealth
 from vlmux.observation import Observer
 from vlmux.policy import PolicyDecision, PolicyEngine, RiskLevel
-from vlmux.protocol import Action, ClickAction, FailAction, FinishAction, WaitAction
+from vlmux.protocol import (
+    Action,
+    ClickAction,
+    ClickRefAction,
+    FailAction,
+    FinishAction,
+    WaitAction,
+)
 from vlmux.runtime import ConfirmationHandler, Runtime, RuntimeConfig
 
 
@@ -277,3 +284,43 @@ def test_runtime_emits_trace_events() -> None:
         "action.approved",
         "task.completed",
     ]
+
+
+def test_succeeded_result_carries_final_observation_payload() -> None:
+    model = ScriptedModel([FinishAction(message="done")])
+    observer = FakeObserver()
+    runtime = Runtime(
+        model=model,
+        observer=observer,
+        executor=FakeExecutor(),
+        config=RuntimeConfig(max_steps=2),
+    )
+
+    result = asyncio.run(runtime.run("task"))
+
+    payload = result.metadata.get("_final_observation")
+    assert payload is not None
+    assert payload["screen"]["image"] == "<omitted>"
+    assert payload["screen"]["width"] == 10
+    assert "windows" in payload
+
+
+def test_click_ref_action_routes_through_executor() -> None:
+    model = ScriptedModel([ClickRefAction(ref="@s1:e1"), FinishAction(message="done")])
+
+    class RefExecutor(FakeExecutor):
+        async def click_ref(self, ref, *, button="left", clicks=1):
+            self.calls = [*getattr(self, "calls", []), ("click_ref", ref, button, clicks)]
+
+    executor = RefExecutor()
+    runtime = Runtime(
+        model=model,
+        observer=FakeObserver(),
+        executor=executor,
+        config=RuntimeConfig(max_steps=3),
+    )
+
+    result = asyncio.run(runtime.run("task"))
+
+    assert result.status is RuntimeStatus.SUCCEEDED
+    assert executor.calls == [("click_ref", "@s1:e1", "left", 1)]

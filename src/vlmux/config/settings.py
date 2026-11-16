@@ -26,7 +26,7 @@ RiskName = Literal["safe", "sensitive", "external_side_effect", "destructive"]
 
 
 def _default_policy_confirm() -> list[RiskName]:
-    return ["sensitive", "destructive"]
+    return ["sensitive", "external_side_effect", "destructive"]
 
 
 class Settings(BaseModel):
@@ -51,7 +51,9 @@ class Settings(BaseModel):
     screenshot_max_height: int | None = Field(default=1440, ge=1)
     screenshot_format: Literal["png", "jpeg"] = "png"
     screenshot_quality: int = Field(default=85, ge=1, le=100)
-    perception_mode: Literal["raw", "ocr", "a11y", "dom", "set_of_marks", "hybrid"] = "raw"
+    perception_mode: Literal["raw", "ocr", "a11y", "dom", "set_of_marks", "hybrid", "ui_tree"] = (
+        "raw"
+    )
     loop_threshold: int = Field(default=5, ge=2, le=100)
     record_runs: bool = False
     runs_dir: str = "runs"
@@ -64,7 +66,31 @@ class Settings(BaseModel):
         values = self.model_dump(mode="json")
         if self.api_key is not None:
             values["api_key"] = "**********"
+        for field in ("base_url", "browser_cdp_url"):
+            raw = values.get(field)
+            if isinstance(raw, str):
+                values[field] = _redact_url_credentials(raw)
         return values
+
+
+def _redact_url_credentials(value: str) -> str:
+    """Mask userinfo embedded in a URL (``scheme://user:pass@host/...``)."""
+
+    from urllib.parse import urlsplit, urlunsplit
+
+    try:
+        parts = urlsplit(value)
+    except ValueError:
+        return value
+    if parts.username is None and parts.password is None:
+        return value
+    try:
+        port = parts.port
+    except ValueError:
+        port = None
+    host = parts.hostname or ""
+    netloc = "***@" + host + (f":{port}" if port else "")
+    return urlunsplit((parts.scheme, netloc, parts.path, "", parts.fragment))
 
 
 def default_config_path() -> Path:
@@ -175,4 +201,11 @@ def load_settings(
     try:
         return Settings.model_validate(values)
     except ValidationError as error:
-        raise ConfigurationError("configuration validation failed") from error
+        fields = sorted(
+            {
+                ".".join(str(part) for part in err.get("loc", ()) if part != "model")
+                for err in error.errors()
+            }
+        )
+        suffix = f": {', '.join(fields)}" if fields else ""
+        raise ConfigurationError(f"configuration validation failed{suffix}") from error

@@ -31,6 +31,19 @@
       "default": null,
       "title": "Error"
     },
+    "error_code": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Machine-readable error code from vlmux.exceptions (e.g. stale_ref).",
+      "title": "Error Code"
+    },
     "id": {
       "minLength": 1,
       "title": "Id",

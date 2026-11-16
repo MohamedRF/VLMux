@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "vlmux"
-version = "0.1.0"
+version = "0.2.0"
 description = "A model-agnostic computer-use runtime for vision-language models."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -46,6 +46,9 @@ ocr = [
 ]
 browser = [
   "websockets>=13,<16",
+]
+uia = [
+  "uiautomation>=2.0.25,<3",
 ]
 
 [project.scripts]

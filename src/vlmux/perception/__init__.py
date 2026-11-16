@@ -13,6 +13,14 @@ from vlmux.perception.som import (
     annotate_observation,
     resolve_mark,
 )
+from vlmux.perception.ui_tree import (
+    RefRegistry,
+    UITreeElement,
+    UITreeProvider,
+    UITreeSnapshot,
+    assign_occurrences,
+    is_interactive,
+)
 
 __all__ = [
     "CaptureOptions",
@@ -22,11 +30,17 @@ __all__ = [
     "RawScreenshot",
     "RectangleDetector",
     "RectangleElement",
+    "RefRegistry",
     "ScreenCaptureProvider",
     "UIElement",
+    "UITreeElement",
+    "UITreeProvider",
+    "UITreeSnapshot",
     "annotate_observation",
+    "assign_occurrences",
     "create_screen_capture_provider",
     "image_to_screen_coordinates",
+    "is_interactive",
     "resolve_mark",
     "screen_to_image_coordinates",
 ]

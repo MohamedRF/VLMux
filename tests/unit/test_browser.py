@@ -17,6 +17,14 @@ class FakeTransport:
         self.results: dict[str, Any] = {
             "Page.getFrameTree": {"frameTree": {"frame": {"url": "https://example.com/"}}},
             "Runtime.evaluate": {"result": {"value": True}},
+            "Page.getNavigationHistory": {
+                "currentIndex": 1,
+                "entries": [
+                    {"id": 10, "url": "https://example.com/a"},
+                    {"id": 11, "url": "https://example.com/b"},
+                    {"id": 12, "url": "https://example.com/c"},
+                ],
+            },
         }
 
     async def call(self, method: str, params: dict[str, Any] | None = None) -> Any:
@@ -72,7 +80,36 @@ def test_browser_executor_dispatches_navigate_and_back() -> None:
     result_back = asyncio.run(executor.execute(BrowserBackAction()))
     assert result_back.success is True
     methods = [method for method, _ in transport.calls]
+    assert "Page.getNavigationHistory" in methods
     assert "Page.navigateToHistoryEntry" in methods
+    navigate_params = [
+        params for method, params in transport.calls if method == "Page.navigateToHistoryEntry"
+    ]
+    # currentIndex=1 -> back jumps to entry id 10, not index 0.
+    assert navigate_params == [{"entryId": 10}]
+
+
+def test_browser_forward_uses_next_history_entry() -> None:
+    transport = FakeTransport()
+    session = BrowserSession(transport)
+    asyncio.run(session.forward())
+    navigate_params = [
+        params for method, params in transport.calls if method == "Page.navigateToHistoryEntry"
+    ]
+    # currentIndex=1 -> forward jumps to entry id 12.
+    assert navigate_params == [{"entryId": 12}]
+
+
+def test_browser_back_at_first_entry_is_noop() -> None:
+    transport = FakeTransport()
+    transport.results["Page.getNavigationHistory"] = {
+        "currentIndex": 0,
+        "entries": [{"id": 10, "url": "https://example.com/a"}],
+    }
+    session = BrowserSession(transport)
+    asyncio.run(session.back())
+    methods = [method for method, _ in transport.calls]
+    assert "Page.navigateToHistoryEntry" not in methods
 
 
 def test_browser_executor_rejects_desktop_action() -> None:

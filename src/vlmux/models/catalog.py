@@ -17,6 +17,26 @@ from vlmux.exceptions import ConfigurationError
 AdapterKind = Literal["openai-compatible", "openrouter", "ollama", "anthropic"]
 
 
+def is_loopback_url(value: str) -> bool:
+    """Return True for loopback-style URLs (localhost, 127/8, ::1, *.localhost)."""
+
+    import ipaddress
+
+    hostname = urlparse(value).hostname
+    if not hostname:
+        return False
+    normalized = hostname.rstrip(".").casefold()
+    if normalized == "localhost" or normalized.endswith(".localhost"):
+        return True
+    try:
+        address = ipaddress.ip_address(normalized.strip("[]"))
+    except ValueError:
+        return False
+    if address.version == 4:
+        return address.packed[0] == 127
+    return address == ipaddress.IPv6Address("::1")
+
+
 class ProviderDefinition(BaseModel):
     """Configuration needed to construct one provider adapter."""
 
@@ -40,6 +60,8 @@ class ProviderDefinition(BaseModel):
             raise ValueError("base URL must be an absolute HTTP(S) URL")
         if parsed.username is not None or parsed.password is not None:
             raise ValueError("base URL must not contain embedded credentials")
+        if parsed.scheme == "http" and not is_loopback_url(value):
+            raise ValueError("plain HTTP is only allowed for loopback endpoints; use https")
         return value.rstrip("/")
 
 
@@ -172,6 +194,16 @@ def load_provider_catalog(path: Path | None = None) -> ProviderCatalog:
         raise ConfigurationError(f"unable to read provider catalog: {catalog_path}") from error
     if any(not provider.custom for provider in providers):
         raise ConfigurationError("persisted provider definitions must be marked custom")
+    builtin_ids = {provider.id for provider in BUILTIN_PROVIDERS}
+    seen: set[str] = set()
+    for provider in providers:
+        if provider.id in builtin_ids:
+            raise ConfigurationError(
+                f"custom provider {provider.id!r} collides with a built-in preset id"
+            )
+        if provider.id in seen:
+            raise ConfigurationError(f"duplicate custom provider id: {provider.id}")
+        seen.add(provider.id)
     return ProviderCatalog(providers)
 
 
@@ -179,6 +211,9 @@ def save_custom_provider(provider: ProviderDefinition, path: Path | None = None)
     """Atomically add or replace a custom provider definition."""
     if not provider.custom:
         raise ValueError("only custom providers can be persisted")
+    builtin_ids = {item.id for item in BUILTIN_PROVIDERS}
+    if provider.id in builtin_ids:
+        raise ValueError(f"custom provider {provider.id!r} collides with a built-in preset id")
     catalog_path = path or default_provider_catalog_path()
     catalog = load_provider_catalog(catalog_path).with_provider(provider)
     custom = [item.model_dump(mode="json") for item in catalog.providers() if item.custom]

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import hashlib
+import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from time import perf_counter
@@ -51,8 +52,24 @@ from vlmux.protocol.validation import validate_action_coordinates
 
 ConfirmationHandler = Callable[[Action, PolicyDecision], Awaitable[bool]]
 
+logger = logging.getLogger("vlmux.runtime")
+
 #: Signature types watched for loop detection.
-_LOOP_SIGNATURE_TYPES = frozenset({"click", "double_click", "right_click", "scroll"})
+_LOOP_SIGNATURE_TYPES = frozenset(
+    {"click", "double_click", "right_click", "scroll", "click_ref", "set_value_ref"}
+)
+
+
+def final_observation_payload(observation: Observation | None) -> dict[str, Any] | None:
+    """Compact observation payload for verifiers; strips the image blob."""
+
+    if observation is None:
+        return None
+    payload = observation.model_dump(mode="json")
+    screen = payload.get("screen")
+    if isinstance(screen, dict):
+        screen["image"] = "<omitted>"
+    return payload
 
 
 class Verifier(Protocol):
@@ -106,6 +123,9 @@ def action_signature(action: Action) -> str:
         return f"click_mark:{action.mark}"
     if isinstance(action, (ClickAction,)):
         return f"click:{action.x},{action.y}"
+    if action.type in ("click_ref", "set_value_ref"):
+        ref = getattr(action, "ref", "")
+        return f"{action.type}:{ref}"
     if action.type in ("double_click", "right_click", "move_cursor"):
         data = action.model_dump()
         return f"{action.type}:{data.get('x')},{data.get('y')}"
@@ -113,6 +133,16 @@ def action_signature(action: Action) -> str:
         data = action.model_dump()
         return f"scroll:{data.get('delta_x')},{data.get('delta_y')}"
     return action.type
+
+
+def _result_metadata(usage: dict[str, int], observation: Observation | None) -> dict[str, Any]:
+    """Compose standard result metadata, threading the final observation."""
+
+    metadata: dict[str, Any] = {"usage": usage}
+    payload = final_observation_payload(observation)
+    if payload is not None:
+        metadata["_final_observation"] = payload
+    return metadata
 
 
 @dataclass(slots=True)
@@ -179,6 +209,22 @@ class Runtime:
                 message="maximum runtime exceeded",
                 metadata={"usage": usage},
             )
+        except Exception as error:
+            # Last-resort firewall: any residual defect in the loop still yields
+            # a structured result instead of an exception out of run().
+            await self._events.emit(
+                "task.failed",
+                task_id=runtime_task.id,
+                reason=f"internal_error:{type(error).__name__}",
+            )
+            return RuntimeResult(
+                task_id=runtime_task.id,
+                status=RuntimeStatus.FAILED,
+                steps=progress.steps,
+                duration_ms=(perf_counter() - started) * 1000,
+                message=f"internal error ({type(error).__name__})",
+                metadata={"usage": usage},
+            )
 
     async def _run_loop(
         self,
@@ -217,7 +263,29 @@ class Runtime:
                     error=str(error),
                 )
                 if failures >= self._config.max_failures:
-                    return await self._failed(task, step, started, str(error), usage=usage)
+                    return await self._failed(
+                        task, step, started, str(error), usage=usage, final_observation=observation
+                    )
+                continue
+            except Exception as error:
+                # A misbehaving adapter must not kill the run either; treat it
+                # as a failed model call and consume the failure budget.
+                failures += 1
+                await self._events.emit(
+                    "model.failed",
+                    task_id=task.id,
+                    step=step,
+                    error=f"unexpected adapter failure ({type(error).__name__})",
+                )
+                if failures >= self._config.max_failures:
+                    return await self._failed(
+                        task,
+                        step,
+                        started,
+                        "model adapter failed unexpectedly",
+                        usage=usage,
+                        final_observation=observation,
+                    )
                 continue
 
             if decision.input_tokens is not None:
@@ -240,9 +308,18 @@ class Runtime:
                     resolved_x, resolved_y = image_to_screen_coordinates(
                         mark_x, mark_y, observation.screen
                     )
-                    action = ClickAction(x=resolved_x, y=resolved_y)
+                    action = ClickAction(
+                        x=resolved_x,
+                        y=resolved_y,
+                        id=action.id,
+                        source_model=action.source_model,
+                        confidence=action.confidence,
+                        metadata=action.metadata,
+                    )
                 except ActionValidationError as error:
-                    return await self._failed(task, step, started, str(error), usage=usage)
+                    return await self._failed(
+                        task, step, started, str(error), usage=usage, final_observation=observation
+                    )
 
             # Loop detection: same signature repeated consecutively.
             signature = action_signature(action)
@@ -265,12 +342,21 @@ class Runtime:
                     started,
                     f"loop detected: '{signature}' repeated {loop_streak} times",
                     usage=usage,
+                    final_observation=observation,
                 )
 
             try:
                 validate_action_coordinates(action, observation.screen)
             except ActionValidationError as error:
-                return await self._failed(task, step, started, str(error), action, usage=usage)
+                return await self._failed(
+                    task,
+                    step,
+                    started,
+                    str(error),
+                    action,
+                    usage=usage,
+                    final_observation=observation,
+                )
             await self._events.emit(
                 "action.proposed",
                 task_id=task.id,
@@ -286,7 +372,13 @@ class Runtime:
                     reason=policy_decision.reason,
                 )
                 return await self._failed(
-                    task, step, started, policy_decision.reason, action, usage=usage
+                    task,
+                    step,
+                    started,
+                    policy_decision.reason,
+                    action,
+                    usage=usage,
+                    final_observation=observation,
                 )
             if (
                 policy_decision.outcome is PolicyOutcome.REQUIRE_CONFIRMATION
@@ -311,6 +403,7 @@ class Runtime:
                         "action was not confirmed",
                         action,
                         usage=usage,
+                        final_observation=observation,
                     )
             await self._events.emit(
                 "action.approved",
@@ -333,12 +426,21 @@ class Runtime:
                     duration_ms=(perf_counter() - started) * 1000,
                     message="dry run proposed one validated action",
                     final_action=action,
-                    metadata={"usage": usage},
+                    metadata=_result_metadata(usage, observation),
                 )
 
             if isinstance(action, FinishAction):
                 if self._verifier is not None:
-                    verified = await self._verifier.verify(task, observation)
+                    try:
+                        verified = await self._verifier.verify(task, observation)
+                    except Exception as error:
+                        await self._events.emit(
+                            "action.rejected",
+                            task_id=task.id,
+                            step=step,
+                            reason=f"verifier failed ({type(error).__name__}): {error}",
+                        )
+                        verified = False
                     if not verified:
                         await self._events.emit(
                             "action.rejected",
@@ -366,6 +468,7 @@ class Runtime:
                                 "task completion could not be verified",
                                 action,
                                 usage=usage,
+                                final_observation=observation,
                             )
                         continue
                 result = ActionResult(action_id=action.id, success=True, duration_ms=0)
@@ -382,10 +485,18 @@ class Runtime:
                     duration_ms=(perf_counter() - started) * 1000,
                     message=action.message or "task completed",
                     final_action=action,
-                    metadata={"usage": usage},
+                    metadata=_result_metadata(usage, observation),
                 )
             if isinstance(action, FailAction):
-                return await self._failed(task, step, started, action.reason, action, usage=usage)
+                return await self._failed(
+                    task,
+                    step,
+                    started,
+                    action.reason,
+                    action,
+                    usage=usage,
+                    final_observation=observation,
+                )
 
             if isinstance(action, ScreenshotAction):
                 result = ActionResult(action_id=action.id, success=True, duration_ms=0)
@@ -407,6 +518,7 @@ class Runtime:
                     "no desktop executor is available",
                     action,
                     usage=usage,
+                    final_observation=observation,
                 )
             else:
                 result = await self._executor.execute(action)
@@ -431,9 +543,13 @@ class Runtime:
                 result=result,
             )
             if self._recorder is not None:
-                await self._recorder.record_step(
-                    task=task, observation=observation, decision=decision, result=result
-                )
+                try:
+                    await self._recorder.record_step(
+                        task=task, observation=observation, decision=decision, result=result
+                    )
+                except Exception as error:
+                    # Losing the trace must not abort the task.
+                    logger.exception("trace recorder failed at step %d: %s", step, error)
             await self._events.emit(
                 "action.executed" if result.success else "action.failed",
                 task_id=task.id,
@@ -459,6 +575,7 @@ class Runtime:
                         result.error or "action execution failed",
                         action,
                         usage=usage,
+                        final_observation=observation,
                     )
 
         await self._events.emit("task.failed", task_id=task.id, reason="max_steps")
@@ -498,6 +615,7 @@ class Runtime:
         message: str,
         final_action: Action | None = None,
         usage: dict[str, int] | None = None,
+        final_observation: Observation | None = None,
     ) -> RuntimeResult:
         await self._events.emit("task.failed", task_id=task.id, reason=message)
         return RuntimeResult(
@@ -507,5 +625,7 @@ class Runtime:
             duration_ms=(perf_counter() - started) * 1000,
             message=message,
             final_action=final_action,
-            metadata={"usage": usage or {"input_tokens": 0, "output_tokens": 0}},
+            metadata=_result_metadata(
+                usage or {"input_tokens": 0, "output_tokens": 0}, final_observation
+            ),
         )

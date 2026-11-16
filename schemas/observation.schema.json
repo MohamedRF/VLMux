@@ -33,7 +33,8 @@
         "a11y",
         "dom",
         "set_of_marks",
-        "hybrid"
+        "hybrid",
+        "ui_tree"
       ],
       "title": "PerceptionMode",
       "type": "string"

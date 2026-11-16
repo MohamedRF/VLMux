@@ -8,6 +8,7 @@ and reports raw reproducible measurements, never fabricated rankings.
 from __future__ import annotations
 
 import tomllib
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Literal
 
@@ -53,27 +54,47 @@ def load_benchmark_spec(path: str | Path) -> BenchmarkSpec:
 
 
 class SpecVerifier:
-    """Evaluate a :class:`VerifierSpec` against final observation metadata."""
+    """Evaluate a :class:`VerifierSpec` against final observation metadata.
+
+    Accepts either an :class:`~vlmux.core.Observation` instance or its
+    ``model_dump(mode="json")`` mapping (as carried in runtime metadata).
+    """
 
     def __init__(self, spec: VerifierSpec) -> None:
         self._spec = spec
 
+    @staticmethod
+    def _field(observation: Any, field_name: str, default: Any = None) -> Any:
+        if isinstance(observation, Mapping):
+            return observation.get(field_name, default)
+        return getattr(observation, field_name, default)
+
     def verify_observation(self, observation: Any) -> bool:
         """Check the success condition using observation metadata."""
+
         spec = self._spec
         if spec.type == "always_true":
             return True
+        metadata = self._field(observation, "metadata", {}) or {}
         if spec.type == "url_equals":
-            url = str(observation.metadata.get("browser_url", ""))
+            url = str(metadata.get("browser_url", ""))
             return url == spec.value
         if spec.type == "screen_contains_text":
-            text = str(observation.metadata.get("ocr_text", ""))
+            text = str(metadata.get("ocr_text", ""))
             return spec.value in text
         if spec.type == "window_exists":
-            windows = [str(w.get("title", "")) for w in observation.windows]
-            return any(spec.value in title for title in windows)
+            windows = self._field(observation, "windows", []) or []
+            titles = [
+                str(
+                    window.get("title", "")
+                    if isinstance(window, Mapping)
+                    else getattr(window, "title", "")
+                )
+                for window in windows
+            ]
+            return any(spec.value in title for title in titles)
         if spec.type == "dom_contains_text":
-            dom = observation.dom or {}
-            html = str(dom.get("html", ""))
+            dom = self._field(observation, "dom", {}) or {}
+            html = str(dom.get("html", "")) if isinstance(dom, Mapping) else ""
             return spec.value in html
         return False

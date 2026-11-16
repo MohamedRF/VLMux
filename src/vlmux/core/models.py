@@ -37,6 +37,7 @@ class PerceptionMode(StrEnum):
     DOM = "dom"
     SET_OF_MARKS = "set_of_marks"
     HYBRID = "hybrid"
+    UI_TREE = "ui_tree"
 
 
 class Task(DomainModel):
@@ -135,6 +136,10 @@ class ActionResult(DomainModel):
     success: bool
     duration_ms: float = Field(ge=0)
     error: str | None = None
+    error_code: str | None = Field(
+        default=None,
+        description="Machine-readable error code from vlmux.exceptions (e.g. stale_ref).",
+    )
     timestamp: datetime = Field(default_factory=_utc_now)
     metadata: dict[str, Any] = Field(default_factory=dict)
 

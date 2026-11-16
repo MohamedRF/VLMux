@@ -24,6 +24,7 @@ from vlmux.observation import (
     OCRObserver,
     ScreenObserver,
     SetOfMarksObserver,
+    UITreeObserver,
 )
 from vlmux.perception import (
     CaptureOptions,
@@ -32,6 +33,8 @@ from vlmux.perception import (
 )
 from vlmux.perception.a11y import WindowsA11yProvider
 from vlmux.perception.ocr import PytesseractOCRProvider
+from vlmux.perception.ui_tree import RefRegistry, UITreeProvider
+from vlmux.perception.windows_uia import WindowsUITreeProvider
 from vlmux.policy import PolicyEngine, RiskLevel
 from vlmux.runtime import ConfirmationHandler, Runtime, RuntimeConfig
 from vlmux.trace import TraceRecorder
@@ -47,7 +50,19 @@ def capture_options_from_settings(settings: Settings) -> CaptureOptions:
     )
 
 
-def build_observer(settings: Settings) -> Observer:
+def build_ui_tree() -> tuple[UITreeProvider, RefRegistry]:
+    """Build the Windows UIA provider and a fresh in-memory ref registry."""
+
+    registry = RefRegistry(cache_dir=None)
+    provider = WindowsUITreeProvider(registry)
+    return provider, registry
+
+
+def build_observer(
+    settings: Settings,
+    *,
+    ui_provider: UITreeProvider | None = None,
+) -> Observer:
     """Build the configured observer chain for a task run."""
     base: Observer = ScreenObserver(
         create_screen_capture_provider(),
@@ -61,6 +76,10 @@ def build_observer(settings: Settings) -> Observer:
         return A11yObserver(base, WindowsA11yProvider())
     if settings.perception_mode == "hybrid":
         return HybridObserver(base, RectangleDetector(), PytesseractOCRProvider())
+    if settings.perception_mode == "ui_tree":
+        if ui_provider is None:
+            ui_provider, _registry = build_ui_tree()
+        return UITreeObserver(base, ui_provider)
     return base
 
 
@@ -96,12 +115,20 @@ async def run_task(
         credentials=CredentialStore(),
     )
     adapter = create_builtin_registry(catalog).create(adapter_config)
-    observer = build_observer(settings)
-    executor = None if dry_run else create_computer_executor()
+    ui_provider: UITreeProvider | None = None
+    ui_registry: RefRegistry | None = None
+    if settings.perception_mode == "ui_tree":
+        ui_provider, ui_registry = build_ui_tree()
+    observer = build_observer(settings, ui_provider=ui_provider)
+    executor = (
+        None
+        if dry_run
+        else create_computer_executor(ui_registry=ui_registry, ui_provider=ui_provider)
+    )
     browser_executor = build_browser_executor(settings)
     recorder: TraceRecorder | None = None
     if settings.record_runs:
-        run_id = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
+        run_id = datetime.now(UTC).strftime("%Y%m%d-%H%M%S-%f")
         recorder = TraceRecorder(Path(settings.runs_dir) / run_id)
         await recorder.record_task(Task(instruction=instruction))
         if events is not None:
@@ -130,3 +157,5 @@ async def run_task(
         return await runtime.run(instruction)
     finally:
         await adapter.aclose()
+        if browser_executor is not None:
+            await browser_executor.aclose()

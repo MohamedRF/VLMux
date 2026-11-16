@@ -41,3 +41,6 @@ vlmux-screenshot.*
 .DS_Store
 Thumbs.db
 Desktop.ini
+
+# UI Automation diagnostics
+@AutomationLog.txt

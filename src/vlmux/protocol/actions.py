@@ -77,7 +77,7 @@ class TypeAction(BaseAction):
     """Type text using keyboard input."""
 
     type: Literal["type"] = "type"
-    text: str = Field(min_length=1)
+    text: str = Field(min_length=1, max_length=100_000)
     interval_ms: int = Field(default=0, ge=0, le=10_000)
 
 
@@ -85,7 +85,7 @@ class PasteAction(BaseAction):
     """Paste the supplied text through the platform clipboard."""
 
     type: Literal["paste"] = "paste"
-    text: str = Field(min_length=1)
+    text: str = Field(min_length=1, max_length=100_000)
 
 
 class KeyAction(BaseAction):
@@ -243,6 +243,45 @@ class ClickMarkAction(BaseAction):
     mark: int = Field(ge=1, le=10_000)
 
 
+#: Pattern for element reference tokens (``@<snapshot_id>:e<index>``).
+REF_PATTERN = r"^@[A-Za-z0-9][A-Za-z0-9_-]{0,31}:e[0-9]{1,7}$"
+
+
+def _validate_ref(value: str) -> str:
+    import re
+
+    if re.fullmatch(REF_PATTERN, value) is None:
+        raise ValueError("ref must look like '@<snapshot_id>:e<index>' (e.g. '@s1a2b3:e12')")
+    return value
+
+
+class RefAction(BaseAction):
+    """Base for actions that target an accessibility-tree element reference."""
+
+    ref: str = Field(min_length=4, max_length=64)
+
+    @field_validator("ref")
+    @classmethod
+    def ref_must_match_pattern(cls, value: str) -> str:
+        """Reject malformed or bare element references."""
+        return _validate_ref(value)
+
+
+class ClickRefAction(RefAction):
+    """Invoke an accessibility-tree element without moving the pointer."""
+
+    type: Literal["click_ref"] = "click_ref"
+    button: Literal["left", "middle", "right"] = "left"
+    clicks: int = Field(default=1, ge=1, le=3)
+
+
+class SetValueRefAction(RefAction):
+    """Set the value of an accessibility-tree element (headless)."""
+
+    type: Literal["set_value_ref"] = "set_value_ref"
+    value: str = Field(default="", max_length=100_000)
+
+
 Action = Annotated[
     ClickAction
     | DoubleClickAction
@@ -265,7 +304,9 @@ Action = Annotated[
     | BrowserReloadAction
     | FinishAction
     | FailAction
-    | ClickMarkAction,
+    | ClickMarkAction
+    | ClickRefAction
+    | SetValueRefAction,
     Field(discriminator="type"),
 ]
 

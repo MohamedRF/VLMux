@@ -33,6 +33,19 @@
           "default": null,
           "title": "Error"
         },
+        "error_code": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Machine-readable error code from vlmux.exceptions (e.g. stale_ref).",
+          "title": "Error Code"
+        },
         "id": {
           "minLength": 1,
           "title": "Id",
@@ -522,6 +535,102 @@
         "mark"
       ],
       "title": "ClickMarkAction",
+      "type": "object"
+    },
+    "ClickRefAction": {
+      "additionalProperties": false,
+      "description": "Invoke an accessibility-tree element without moving the pointer.",
+      "properties": {
+        "button": {
+          "default": "left",
+          "enum": [
+            "left",
+            "middle",
+            "right"
+          ],
+          "title": "Button",
+          "type": "string"
+        },
+        "clicks": {
+          "default": 1,
+          "maximum": 3,
+          "minimum": 1,
+          "title": "Clicks",
+          "type": "integer"
+        },
+        "confidence": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Confidence"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        },
+        "ref": {
+          "maxLength": 64,
+          "minLength": 4,
+          "title": "Ref",
+          "type": "string"
+        },
+        "source_model": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Model"
+        },
+        "timestamp": {
+          "format": "date-time",
+          "title": "Timestamp",
+          "type": "string"
+        },
+        "type": {
+          "const": "click_ref",
+          "default": "click_ref",
+          "title": "Type",
+          "type": "string"
+        },
+        "version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ref"
+      ],
+      "title": "ClickRefAction",
       "type": "object"
     },
     "CloseWindowAction": {
@@ -1267,6 +1376,7 @@
               "browser_reload": "#/$defs/BrowserReloadAction",
               "click": "#/$defs/ClickAction",
               "click_mark": "#/$defs/ClickMarkAction",
+              "click_ref": "#/$defs/ClickRefAction",
               "close_window": "#/$defs/CloseWindowAction",
               "double_click": "#/$defs/DoubleClickAction",
               "drag": "#/$defs/DragAction",
@@ -1281,6 +1391,7 @@
               "right_click": "#/$defs/RightClickAction",
               "screenshot": "#/$defs/ScreenshotAction",
               "scroll": "#/$defs/ScrollAction",
+              "set_value_ref": "#/$defs/SetValueRefAction",
               "type": "#/$defs/TypeAction",
               "wait": "#/$defs/WaitAction"
             },
@@ -1352,6 +1463,12 @@
             },
             {
               "$ref": "#/$defs/ClickMarkAction"
+            },
+            {
+              "$ref": "#/$defs/ClickRefAction"
+            },
+            {
+              "$ref": "#/$defs/SetValueRefAction"
             }
           ],
           "title": "Action"
@@ -1648,6 +1765,7 @@
           "title": "Source Model"
         },
         "text": {
+          "maxLength": 100000,
           "minLength": 1,
           "title": "Text",
           "type": "string"
@@ -1947,6 +2065,91 @@
       "title": "ScrollAction",
       "type": "object"
     },
+    "SetValueRefAction": {
+      "additionalProperties": false,
+      "description": "Set the value of an accessibility-tree element (headless).",
+      "properties": {
+        "confidence": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Confidence"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        },
+        "ref": {
+          "maxLength": 64,
+          "minLength": 4,
+          "title": "Ref",
+          "type": "string"
+        },
+        "source_model": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Model"
+        },
+        "timestamp": {
+          "format": "date-time",
+          "title": "Timestamp",
+          "type": "string"
+        },
+        "type": {
+          "const": "set_value_ref",
+          "default": "set_value_ref",
+          "title": "Type",
+          "type": "string"
+        },
+        "value": {
+          "default": "",
+          "maxLength": 100000,
+          "title": "Value",
+          "type": "string"
+        },
+        "version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ref"
+      ],
+      "title": "SetValueRefAction",
+      "type": "object"
+    },
     "StepRecord": {
       "additionalProperties": false,
       "description": "Concise history for a completed runtime step.",
@@ -2046,6 +2249,7 @@
           "title": "Source Model"
         },
         "text": {
+          "maxLength": 100000,
           "minLength": 1,
           "title": "Text",
           "type": "string"

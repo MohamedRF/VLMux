@@ -1,8 +1,10 @@
 # Calculator multiplication benchmark.
+# A small three-digit result so the check is stable across display locales
+# (thousands grouping never splits a three-digit number).
 name = "calculator_multiplication"
-task = "Open Calculator and calculate 1729 multiplied by 47"
+task = "Open Calculator and calculate 51 multiplied by 7"
 max_steps = 20
 
 [success]
 type = "screen_contains_text"
-value = "81263"
+value = "357"

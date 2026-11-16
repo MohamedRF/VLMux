@@ -50,15 +50,26 @@ class BrowserExecutor:
             duration_ms=(perf_counter() - started) * 1000,
         )
 
+    async def aclose(self) -> None:
+        """Close the underlying CDP session, if any."""
+
+        close = getattr(self._session, "aclose", None)
+        if close is not None:
+            await close()
+
     async def observe(self) -> Observation:
         """Return a DOM-mode observation combining page text and elements."""
         dom = await self._session.dom()
         elements = await self._session.interactive_elements()
         url = await self._session.current_url()
+        try:
+            width, height = await self._session.viewport()
+        except Exception:
+            width, height = 1920, 1080
         png = await self._session.screenshot_png()
         screen = ScreenObservation(
-            width=1,
-            height=1,
+            width=width,
+            height=height,
             image=base64.b64encode(png).decode("ascii")
             if png
             else base64.b64encode(b"\x89PNG\r\n\x1a\n").decode("ascii"),

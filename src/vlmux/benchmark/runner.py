@@ -67,14 +67,29 @@ class BenchmarkRunner:
         started = perf_counter()
         result = await self._run_task(spec.task, model_reference, spec.max_steps)
         latency_ms = (perf_counter() - started) * 1000
-        usage = result.metadata.get("usage", {}) if isinstance(result.metadata, dict) else {}
-        input_tokens = int(usage.get("input_tokens", 0))
-        output_tokens = int(usage.get("output_tokens", 0))
+        metadata = result.metadata if isinstance(result.metadata, dict) else {}
+        # The final observation rides on metadata so verifiers can inspect it;
+        # never leak it into the measurement record.
+        final_observation = metadata.pop("_final_observation", None)
+        usage = metadata.get("usage", {})
+        if not isinstance(usage, dict):
+            usage = {}
+
+        def _count(name: str) -> int:
+            try:
+                return int(usage.get(name, 0) or 0)
+            except (TypeError, ValueError):
+                return 0
+
+        input_tokens = _count("input_tokens")
+        output_tokens = _count("output_tokens")
         success = result.status is RuntimeStatus.SUCCEEDED
         if success and spec.success.type != "always_true":
-            final_observation = result.metadata.get("_final_observation")
             if final_observation is not None:
                 success = SpecVerifier(spec.success).verify_observation(final_observation)
+            else:
+                # Without the final observation the verifier cannot pass honestly.
+                success = False
         cost = estimate_cost(
             model_reference,
             input_tokens,
@@ -102,7 +117,10 @@ def discover_specs(directory: str | Path) -> list[BenchmarkSpec]:
         raise FileNotFoundError(f"benchmark directory not found: {base}")
     specs: list[BenchmarkSpec] = []
     for path in sorted(base.glob("*.toml")):
-        specs.append(load_benchmark_spec(path))
+        try:
+            specs.append(load_benchmark_spec(path))
+        except Exception as error:
+            raise ValueError(f"invalid benchmark spec {path}: {error}") from error
     return specs
 
 

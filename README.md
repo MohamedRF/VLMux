@@ -22,6 +22,8 @@ model → VLMux → browser / desktop
 - ✅ MCP server (`vlmux mcp` / `vlmux-mcp`), local REST API (`vlmux serve`), and Python SDK (`VLMux`, `Computer`)
 - ✅ Opt-in trace recording and `vlmux replay`; TOML benchmarks with verifiers and `vlmux benchmark`
 - ✅ macOS and Linux desktop executors alongside Windows
+- ✅ Accessibility-tree snapshots with element refs (`perception_mode = "ui_tree"`, Windows UIA; `pip install vlmux[uia]`)
+- ✅ Agent-facing JSON envelope commands: `vlmux snapshot`, `vlmux click @ref`, `vlmux set-value @ref`
 
 Windows desktop input is available through an isolated executor. MSS-based full-screen and monitor
 capture are available where the operating system provides an interactive display. Active-window
@@ -71,7 +73,7 @@ format = "png"
 quality = 85
 
 [policy]
-confirm = ["sensitive", "destructive"]
+confirm = ["sensitive", "external_side_effect", "destructive"]
 deny = []
 ```
 
@@ -169,12 +171,24 @@ calculator/text-editor workflow.
 
 ```toml
 [runtime]
-perception_mode = "raw"  # or "set_of_marks" or "hybrid"
+perception_mode = "raw"  # or "set_of_marks" or "hybrid" or "ocr" or "a11y" or "ui_tree"
 ```
 
 `set_of_marks` draws numbered red badges over detected UI elements; the model may then answer
-`{"type": "click_mark", "mark": 3}` and the runtime resolves it to coordinates. `hybrid` adds DOM
-metadata when a browser is attached.
+`{"type": "click_mark", "mark": 3}` and the runtime resolves it to coordinates. `hybrid` adds OCR
+text alongside marks. `ui_tree` (Windows) tags every interactive accessibility element with a
+stable ref like `@s1a2b3:e8`; the model can then act without pixels:
+
+```json
+{"type": "click_ref", "ref": "@s1a2b3:e8"}
+{"type": "set_value_ref", "ref": "@s1a2b3:e3", "value": "Ada"}
+```
+
+Ref actions invoke the UIA element directly — the pointer does not move and focus is not taken —
+and fail closed with `stale_ref` when the UI changed, instead of clicking the wrong thing.
+See [docs/a11y-refs.md](docs/a11y-refs.md) for the full workflow, including the one-shot
+`vlmux snapshot` / `vlmux click` / `vlmux set-value` commands and the MCP `desktop_snapshot`,
+`desktop_click`, and `desktop_set_value` tools. `vlmux[uia]` is required for `ui_tree`.
 
 ## Browser mode
 
@@ -227,7 +241,8 @@ approve those actions; platform executors will be solely responsible for OS inte
 ## Safety and privacy
 
 VLMux treats model output as untrusted input. Actions must pass schema, coordinate, and local
-policy validation. Sensitive and destructive classes require confirmation by default. Screenshots
+policy validation. Sensitive, external-side-effect (launching applications, navigating the browser),
+and destructive classes require confirmation by default. Screenshots
 can contain sensitive information; choose local Ollama plus `--offline` when they must not leave
 the machine.
 

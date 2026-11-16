@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json
 import os
 import platform
 import sys
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 from pydantic import SecretStr, ValidationError
@@ -20,7 +21,7 @@ from vlmux.cli.services import capture_options_from_settings, run_task
 from vlmux.config import default_config_path, load_settings
 from vlmux.core import Observation, RuntimeStatus
 from vlmux.events import Event, EventBus
-from vlmux.exceptions import ConfigurationError, VLMuxError
+from vlmux.exceptions import ConfigurationError, UnsupportedPlatformError, VLMuxError
 from vlmux.executors import create_computer_executor
 from vlmux.models import (
     AdapterConfig,
@@ -101,6 +102,8 @@ def doctor() -> None:
     table.add_row(
         "Browser integration", "OK" if browser_available else "UNAVAILABLE", browser_detail
     )
+    ui_ok, ui_detail = _probe_ui_tree()
+    table.add_row("Accessibility tree", "OK" if ui_ok else "UNAVAILABLE", ui_detail)
     console.print(table)
     if not python_supported or capture_error is not None or executor_error is not None:
         raise typer.Exit(code=1)
@@ -131,6 +134,170 @@ def _probe_browser() -> tuple[bool, str]:
     if not settings.browser_cdp_url:
         return False, "no CDP endpoint configured (set browser_cdp_url)"
     return True, settings.browser_cdp_url
+
+
+def _probe_ui_tree() -> tuple[bool, str]:
+    try:
+        from vlmux.perception.ui_tree import RefRegistry
+        from vlmux.perception.windows_uia import WindowsUITreeProvider
+
+        provider = WindowsUITreeProvider(RefRegistry())
+        snapshot = provider.snapshot(max_elements=1)
+        return True, f"desktop visible ({snapshot.to_dict()['ref_count']}+ interactive refs)"
+    except UnsupportedPlatformError as error:
+        return False, str(error)
+    except Exception as error:
+        return False, str(error)
+
+
+def _emit_envelope(
+    ok: bool, command: str, *, data: Any = None, error: str | None = None, code: str | None = None
+) -> None:
+    """Print one machine-readable JSON envelope (agent-desktop style)."""
+    payload: dict[str, Any] = {
+        "version": __version__,
+        "ok": ok,
+        "command": command,
+    }
+    if data is not None:
+        payload["data"] = data
+    if error is not None:
+        payload["error"] = {"message": error, "code": code}
+    print(json.dumps(payload))
+
+
+def _ui_tree_cli() -> Any:
+    """Build a UIA provider persisting snapshots in the user cache directory."""
+    from platformdirs import user_cache_path
+
+    from vlmux.perception.ui_tree import RefRegistry
+    from vlmux.perception.windows_uia import WindowsUITreeProvider
+
+    registry = RefRegistry(cache_dir=user_cache_path("vlmux", appauthor=False) / "snapshots")
+    provider = WindowsUITreeProvider(registry)
+    return provider, registry
+
+
+@app.command("snapshot")
+def snapshot_command(
+    window_id: Annotated[
+        str | None,
+        typer.Option("--window-id", help="Capture only this window handle."),
+    ] = None,
+    app: Annotated[
+        str | None,
+        typer.Option("--app", help="Capture only the window whose title contains this text."),
+    ] = None,
+    interactive: Annotated[
+        bool,
+        typer.Option("--interactive/--all", "-i", help="Only elements an agent can act on."),
+    ] = True,
+    max_elements: Annotated[int, typer.Option("--max-elements", min=1, max=2000)] = 500,
+) -> None:
+    """Print the accessibility tree with element refs as a JSON envelope.
+
+    Refs look like ``@s1a2b3:e8`` and belong to this snapshot; pass them to
+    ``vlmux click`` or ``vlmux set-value``. Re-snapshot when a ref action
+    fails with code ``stale_ref``.
+    """
+    try:
+        provider, _registry = _ui_tree_cli()
+        snapshot = provider.snapshot(
+            window_id=window_id,
+            app=app,
+            interactive_only=interactive,
+            max_elements=max_elements,
+        )
+    except VLMuxError as error:
+        _emit_envelope(False, "snapshot", error=str(error), code=getattr(error, "code", "error"))
+        raise typer.Exit(code=1) from error
+    _emit_envelope(True, "snapshot", data=snapshot.to_dict())
+
+
+@app.command("click")
+def click_command(
+    ref: Annotated[str, typer.Argument(help="Element ref, e.g. '@s1a2b3:e8'.")],
+    button: Annotated[str, typer.Option("--button", help="Mouse button.")] = "left",
+    double: Annotated[bool, typer.Option("--double", help="Double-invoke.")] = False,
+) -> None:
+    """Invoke an accessibility-tree element by ref (headless, no pointer)."""
+    from vlmux.protocol import ClickRefAction
+
+    if button not in {"left", "middle", "right"}:
+        _emit_envelope(False, "click", error=f"invalid button: {button!r}", code="invalid_args")
+        raise typer.Exit(code=2)
+    try:
+        provider, registry = _ui_tree_cli()
+        executor = create_computer_executor(ui_registry=registry, ui_provider=provider)
+        action = ClickRefAction(
+            ref=ref,
+            button=button,  # narrowed by the explicit check above
+            clicks=2 if double else 1,
+        )
+        result = asyncio.run(executor.execute(action))
+    except (VLMuxError, ValueError) as error:
+        _emit_envelope(
+            False,
+            "click",
+            error=str(error),
+            code=getattr(error, "code", "invalid_args"),
+        )
+        raise typer.Exit(code=1) from error
+    payload = result.model_dump(mode="json")
+    payload.pop("id", None)
+    if result.success:
+        payload.pop("error", None)
+        _emit_envelope(True, "click", data=payload)
+        return
+    _emit_envelope(
+        False,
+        "click",
+        data=payload,
+        error=result.error or "action failed",
+        code=result.error_code or "action_execution_error",
+    )
+    raise typer.Exit(code=1)
+
+
+@app.command("set-value")
+def set_value_command(
+    ref: Annotated[str, typer.Argument(help="Element ref, e.g. '@s1a2b3:e8'.")],
+    value: Annotated[str | None, typer.Argument(help="Value to set (omit with --stdin).")] = None,
+    stdin: Annotated[
+        bool,
+        typer.Option("--stdin", help="Read the value from stdin (keeps secrets out of ps output)."),
+    ] = False,
+) -> None:
+    """Set an accessibility-tree element's value by ref (headless)."""
+    from vlmux.protocol import SetValueRefAction
+
+    if stdin == (value is not None):
+        console.print("[red]Pass exactly one of VALUE or --stdin.[/red]")
+        raise typer.Exit(code=2)
+    resolved = sys.stdin.read() if stdin else str(value)
+    try:
+        provider, registry = _ui_tree_cli()
+        executor = create_computer_executor(ui_registry=registry, ui_provider=provider)
+        action = SetValueRefAction(ref=ref, value=resolved)
+        result = asyncio.run(executor.execute(action))
+    except (VLMuxError, ValueError) as error:
+        _emit_envelope(
+            False,
+            "set-value",
+            error=str(error),
+            code=getattr(error, "code", "invalid_args"),
+        )
+        raise typer.Exit(code=1) from error
+    if result.success:
+        _emit_envelope(True, "set-value", data={"ok": True})
+        return
+    _emit_envelope(
+        False,
+        "set-value",
+        error=result.error or "action failed",
+        code=result.error_code or "action_execution_error",
+    )
+    raise typer.Exit(code=1)
 
 
 @app.command("observe")
@@ -559,12 +726,24 @@ def main() -> None:
 @app.command()
 def serve(
     host: Annotated[str, typer.Option(help="Bind host.")] = "127.0.0.1",
-    port: Annotated[int, typer.Option(help="Bind port.")] = 8765,
+    port: Annotated[int, typer.Option(help="Bind port.", min=1, max=65535)] = 8765,
+    token: Annotated[
+        str | None,
+        typer.Option(
+            help="Require 'Authorization: Bearer <token>' on all requests. "
+            "Defaults to the VLMUX_API_TOKEN environment variable. "
+            "Always required for non-loopback hosts."
+        ),
+    ] = None,
 ) -> None:
     """Start the local REST API exposing the VLMux runtime."""
     from vlmux.server import serve as serve_api
 
-    serve_api(host=host, port=port)
+    try:
+        serve_api(host=host, port=port, token=token)
+    except ValueError as error:
+        console.print(f"[red]Cannot start server:[/red] {error}")
+        raise typer.Exit(code=2) from error
 
 
 @app.command()
@@ -581,15 +760,26 @@ def replay(
     runs_dir: Annotated[str, typer.Option(help="Runs directory.")] = "runs",
 ) -> None:
     """Display a recorded task trace."""
+    import re
+
     from vlmux.trace import load_trace_events, load_trace_steps
 
+    if not re.fullmatch(r"[\w][\w.-]{0,127}", run_id):
+        console.print(
+            f"[red]Invalid run id:[/red] {run_id!r} (expected letters, digits, '-' or '_')"
+        )
+        raise typer.Exit(code=1)
     directory = Path(runs_dir) / run_id
     if not directory.exists():
         console.print(f"[red]Trace not found:[/red] {directory}")
         raise typer.Exit(code=1)
     task_path = directory / "task.json"
     if task_path.exists():
-        console.print_json(data=__import__("json").loads(task_path.read_text(encoding="utf-8")))
+        try:
+            console.print_json(data=json.loads(task_path.read_text(encoding="utf-8")))
+        except json.JSONDecodeError as error:
+            console.print(f"[red]task.json is corrupt:[/red] {error}")
+            raise typer.Exit(code=1) from error
     steps = load_trace_steps(directory)
     events = load_trace_events(directory)
     table = Table(title=f"Replay: {run_id}")
@@ -622,17 +812,31 @@ def benchmark(
     from vlmux.benchmark.runner import BenchmarkResult
 
     model_refs: list[str] = list(models) if models else []
-    if not model_refs:
+    try:
         settings = load_settings()
+    except ConfigurationError:
+        settings = None
+    if not model_refs:
+        if settings is None or not settings.provider or not settings.model:
+            console.print(
+                "[red]No model configured.[/red] "
+                "Pass --model provider/model or run `vlmux config show`."
+            )
+            raise typer.Exit(code=1)
         model_refs = [f"{settings.provider}/{settings.model}"]
 
     async def run_task_for_benchmark(task_text: str, model_ref: str, max_steps: int) -> object:
-        settings = load_settings(cli_overrides={"model": model_ref, "max_steps": max_steps})
-        return await run_task(task_text, settings)
+        benchmark_settings = load_settings(
+            cli_overrides={"max_steps": max_steps},
+        )
+        return await run_task(task_text, benchmark_settings, model_override=model_ref)
 
     try:
         specs = discover_specs(directory)
     except FileNotFoundError as error:
+        console.print(f"[red]Benchmark error:[/red] {error}")
+        raise typer.Exit(code=1) from error
+    except (OSError, ValueError) as error:
         console.print(f"[red]Benchmark error:[/red] {error}")
         raise typer.Exit(code=1) from error
     if not specs:
@@ -642,9 +846,36 @@ def benchmark(
     async def run_all() -> list[BenchmarkResult]:
         runner = BenchmarkRunner(run_task_for_benchmark)
         results: list[BenchmarkResult] = []
+        price_input = settings.input_price_per_1k if settings else None
+        price_output = settings.output_price_per_1k if settings else None
         for spec in specs:
             for model_ref in model_refs:
-                results.append(await runner.run_one(spec, model_ref))
+                try:
+                    results.append(
+                        await runner.run_one(
+                            spec,
+                            model_ref,
+                            input_price_per_1k=price_input,
+                            output_price_per_1k=price_output,
+                        )
+                    )
+                except Exception as error:
+                    console.print(
+                        f"[red]Benchmark error[/red] spec={spec.name} model={model_ref}: {error}"
+                    )
+                    results.append(
+                        BenchmarkResult(
+                            spec_name=spec.name,
+                            model=model_ref,
+                            success=False,
+                            steps=0,
+                            latency_ms=0.0,
+                            input_tokens=0,
+                            output_tokens=0,
+                            cost="unknown",
+                            status="error",
+                        )
+                    )
         return results
 
     console.print(format_report(asyncio.run(run_all())))

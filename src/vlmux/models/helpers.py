@@ -29,7 +29,13 @@ def build_vision_probe() -> tuple[str, str]:
 def usage_integer(usage: dict[str, Any], key: str) -> int | None:
     """Read one non-negative integer from a provider usage envelope."""
     value = usage.get(key)
-    return value if isinstance(value, int) and value >= 0 else None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int) and value >= 0:
+        return value
+    if isinstance(value, float) and value.is_integer() and value >= 0:
+        return int(value)
+    return None
 
 
 def model_ids(payload: object) -> set[str]:

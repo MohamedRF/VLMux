@@ -57,9 +57,11 @@ def _ensure_com_initialized() -> None:
     """
 
     import ctypes
+    import sys
 
-    with contextlib.suppress(Exception):
-        ctypes.windll.ole32.CoInitialize(None)
+    if sys.platform == "win32":  # ``ctypes.windll`` exists only on Windows.
+        with contextlib.suppress(Exception):
+            ctypes.windll.ole32.CoInitialize(None)
 
 
 def _role_of(control_type_name: str) -> str:
